@@ -1,0 +1,23 @@
+# Python 虚拟环境
+venv/
+.venv/
+env/
+
+# 运行时日志
+server.log
+server.err
+*.log
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 本地配置 / 临时文件
+*.local
+.DS_Store
+.codebuddy/
+
+# 临时验证脚本
+_verify_*.py
