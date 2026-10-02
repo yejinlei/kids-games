@@ -103,15 +103,14 @@
     .city-label .cost { fill: var(--primary, #ff6b35); font-size: 9px; font-weight: 800; }
     .move-path { fill: none; stroke: #ff6b35; stroke-width: 4; stroke-linecap: round; opacity: .85; }
     .move-hint { text-align: center; margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--primary-d, #c2410c); }
-    .pawn-mine-ring { opacity: .95; }
-    .pawn-mine-pulse { animation: pawnPulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
-    @keyframes pawnPulse {
-      0%   { transform: scale(1);   opacity: .8; }
-      100% { transform: scale(2.1); opacity: 0; }
+    /* 旗杆 + 旗帜定位标记（所有玩家统一） */
+    .pawn-pole { opacity: .9; }
+    .pawn-flag { transform-box: fill-box; transform-origin: 0% 50%; animation: pawnWave 2.4s ease-in-out infinite; }
+    @keyframes pawnWave {
+      0%, 100% { transform: rotate(-4deg); }
+      50%      { transform: rotate(4deg); }
     }
-    .pawn-mine-tag { font-size: 10px; font-weight: 800; fill: var(--primary, #ff6b35); stroke: #fff; stroke-width: 2.5px; paint-order: stroke; }
-    /* 对手：同样有高亮环，但更暗、更细、无动画 */
-    .pawn-other-ring { opacity: .38; }
+    .pawn-tag { font-size: 11px; font-weight: 800; fill: var(--primary, #ff6b35); stroke: #fff; stroke-width: 2.5px; paint-order: stroke; }
     .pawn-other-tag { font-size: 9px; font-weight: 700; fill: #666; stroke: #fff; stroke-width: 2.5px; paint-order: stroke; }
     .city.shared .city-circle { fill: #fff3cd; stroke: #e0a800; }
     .city.secret .city-circle { stroke: #9b59b6; stroke-width: 3; stroke-dasharray: 3 2; }
@@ -124,13 +123,28 @@
       border-radius: 16px; overflow: hidden;
     }
     .board svg { width: 100%; height: 100%; display: block; }
+    .head-right { display: flex; align-items: center; gap: 8px; }
+    .btn.small { padding: 6px 12px; font-size: 13px; }
+    /* 暗色夜视主题：背景与文字反色，线路/棋子颜色保持不变，清晰可读 */
+    .board.dark { background: linear-gradient(180deg, #0f1b30, #0a1322); }
+    .board.dark svg { background: #0f1d33; }
+    .board.dark .land { fill: #16263f; stroke: #2c4a6e; }
+    .board.dark .route { stroke: #3a5f8a; opacity: .7; }
+    .board.dark .route.reach { stroke: #ffb300; }
+    .board.dark .city-circle { stroke: #33425a; }
+    .board.dark .city-label { fill: #e8eef6; stroke: #0a1322; }
+    .board.dark .pawn-other-tag { fill: #cdd6e2; stroke: #0a1322; }
     .action-bar {
       display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap;
       position: sticky; bottom: 0; background: var(--panel);
       padding: 10px 0 6px; z-index: 6;
     }
     .action-bar .btn { width: auto; flex: 1; }
-    .dice-area { display: flex; gap: 10px; justify-content: center; margin-top: 12px; min-height: 8px; }
+    .board-area { position: relative; }
+    .dice-area {
+      position: absolute; right: 14px; bottom: 14px; z-index: 5;
+      display: flex; gap: 10px; justify-content: flex-end; pointer-events: none;
+    }
     .die {
       width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center;
       justify-content: center; font-weight: 800; color: #fff; box-shadow: var(--shadow); font-size: 14px;
@@ -188,7 +202,6 @@
     .city.reach .city-circle { stroke: #ffb300; stroke-width: 4; cursor: pointer; }
     .city.shared .city-circle { stroke: #ff7a59; stroke-width: 4; }
     .city.secret .city-circle { stroke: #2ecc71; stroke-width: 4; stroke-dasharray: 4 3; }
-    .pawn { stroke: #fff; stroke-width: 2; }
     .toast {
       position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
       background: #2c3e50; color: #fff; padding: 10px 18px; border-radius: 999px;
@@ -315,11 +328,16 @@
     <section class="board-wrap">
       <div class="board-head">
         <span id="turnInfo" class="turn-info">准备中…</span>
-        <span id="timerInfo" class="timer hidden"></span>
+        <span class="head-right">
+          <button id="themeBtn" class="btn ghost small" title="切换主题（亮色 / 暗色）">🌞 亮色</button>
+          <span id="timerInfo" class="timer hidden"></span>
+        </span>
       </div>
-      <div id="board" class="board"></div>
+      <div class="board-area">
+        <div id="board" class="board"></div>
+        <div id="diceArea" class="dice-area"></div>
+      </div>
       <div id="moveHint" class="move-hint hidden"></div>
-      <div id="diceArea" class="dice-area"></div>
       <div class="action-bar">
         <button id="addBotBtn" class="btn hidden">🤖 添加机器人</button>
         <button id="removeBotBtn" class="btn ghost hidden">移除机器人</button>
@@ -568,20 +586,16 @@
             const px = spread ? base.x + (i - (n - 1) / 2) * 14 : base.x;
             const py = spread ? base.y - 15 : base.y;
             const isMine = my && p.pid === my.pid;
+            // 旗杆 + 旗帜（所有玩家统一，无底部圆球）
+            const top = py - 20;
+            pawnsSvg += '<line class="pawn-pole" x1="' + px + '" y1="' + py + '" x2="' + px + '" y2="' + top + '" stroke="' +
+              colorHex(p.color) + '" stroke-width="2"/>';
+            pawnsSvg += '<path class="pawn-flag" d="M' + px + ' ' + top +
+              ' L' + (px + 13) + ' ' + (top + 4) + ' L' + px + ' ' + (top + 8) + ' Z" fill="' +
+              colorHex(p.color) + '" stroke="#fff" stroke-width="1.5"/>';
             if (isMine) {
-              // 自己：外圈 + 呼吸动画 + 定位标记
-              pawnsSvg += '<circle class="pawn-mine-ring" cx="' + px + '" cy="' + py + '" r="8" fill="none" stroke="' +
-                colorHex(p.color) + '" stroke-width="2.5"/>';
-              pawnsSvg += '<circle class="pawn-mine-pulse" cx="' + px + '" cy="' + py + '" r="8" fill="none" stroke="' +
-                colorHex(p.color) + '" stroke-width="2"/>';
-              pawnsSvg += '<text class="pawn-mine-tag" x="' + px + '" y="' + (py - 13) + '" text-anchor="middle">▼ 我</text>';
-            } else {
-              // 对手：暗色外圈，无动画，不单独挂名字
-              pawnsSvg += '<circle class="pawn-other-ring" cx="' + px + '" cy="' + py + '" r="7" fill="none" stroke="' +
-                colorHex(p.color) + '" stroke-width="2"/>';
+              pawnsSvg += '<text class="pawn-tag" x="' + (px + 16) + '" y="' + (top + 7) + '" text-anchor="start">我</text>';
             }
-            pawnsSvg += '<circle class="pawn" cx="' + px + '" cy="' + py + '" r="' + (isMine ? 5.5 : 5) + '" fill="' +
-              colorHex(p.color) + '" stroke="#fff" stroke-width="2"/>';
           });
           // 同城所有对手的名字合并成一行，放在城市点下方
           const others = my ? list.filter(function (p) { return p.pid !== my.pid; }) : [];
@@ -909,6 +923,18 @@
         try { localStorage.removeItem(STORE_KEY); } catch (e) {}
         location.reload();
       });
+
+      // 主题切换：亮色 ↔ 暗色（纯 CSS 类切换，不重算几何）
+      const THEME_KEY = 'shanzhuan_theme';
+      let themeDark = false;
+      function applyTheme() {
+        $('board').classList.toggle('dark', themeDark);
+        $('themeBtn').textContent = themeDark ? '🌙 暗色' : '🌞 亮色';
+        try { localStorage.setItem(THEME_KEY, themeDark ? 'dark' : 'light'); } catch (e) {}
+      }
+      $('themeBtn').addEventListener('click', function () { themeDark = !themeDark; applyTheme(); });
+      try { themeDark = localStorage.getItem(THEME_KEY) === 'dark'; } catch (e) {}
+      applyTheme();
 
       (async function boot() {
         try {
