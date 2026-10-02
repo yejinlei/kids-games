@@ -1,3 +1,5 @@
 Flask>=2.3
 Flask-SocketIO>=5.3
 python-socketio>=5.8
+# 让 threading 模式下也能使用真正的 WebSocket（降低实时同步延迟）
+simple-websocket>=1.0
