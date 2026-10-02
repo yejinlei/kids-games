@@ -2,6 +2,8 @@ app = "kids-games-shanhe"
 primary_region = "sjc"
 
 [build]
+  # Paketo Python 构建包：识别 requirements.txt 安装依赖，按 Procfile 启动 web 进程
+  builder = "paketobuildpacks/builder-jammy-base"
 
 [env]
   PORT = "8080"
