@@ -129,8 +129,9 @@
     .board.dark { background: linear-gradient(180deg, #0f1b30, #0a1322); }
     .board.dark svg { background: #0f1d33; }
     .board.dark .land { fill: #16263f; stroke: #2c4a6e; }
-    .board.dark .route { stroke: #3a5f8a; opacity: .7; }
-    .board.dark .route.reach { stroke: #ffb300; }
+    /* 线路保留各自的彩色描边（不覆盖 stroke），只提高亮度让深底下更醒目 */
+    .board.dark .route { opacity: .9; }
+    .board.dark .route.reach { filter: drop-shadow(0 0 6px rgba(255,179,0,.95)); }
     .board.dark .city-circle { stroke: #33425a; }
     .board.dark .city-label { fill: #e8eef6; stroke: #0a1322; }
     .board.dark .pawn-other-tag { fill: #cdd6e2; stroke: #0a1322; }
