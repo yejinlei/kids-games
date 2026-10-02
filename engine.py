@@ -221,19 +221,18 @@ class GameRoom:
             self.log.append(f'{p["name"]} 获得城市卡 {city}，+{pts} 分！')
             # 步骤四：翻开一张新的城市卡，补齐桌面 3 张
             self.shared_cards[idx] = self.deck.pop() if self.deck else None
-        # 秘密目的地：到达或【经过】都算完成（官方规则）
-        if p['secret'] in path and not p['goal_done']:
-            p['goal_done'] = True
-            if city == p['secret']:
-                self.log.append(f'{p["name"]} 抵达秘密目的地 {city}！')
-            else:
-                self.log.append(f'{p["name"]} 途经秘密目的地 {p["secret"]}（也算达成）！')
-        if p['score'] >= WIN_SCORE and p['goal_done'] and p['pid'] not in self.finish_order:
+        # 秘密目的地：只有【当前停留】在秘密目的地才算到达（途经不算）
+        arrived = (city == p['secret'])
+        if arrived and not p['goal_done']:
+            self.log.append(f'{p["name"]} 抵达秘密目的地 {city}！')
+        p['goal_done'] = arrived
+        # 获胜条件：分数 ≥ WIN_SCORE 且 当前停留在秘密目的地，两者同时满足
+        if p['score'] >= WIN_SCORE and arrived and p['pid'] not in self.finish_order:
             self.finish_order.append(p['pid'])
             self.log.append(f'🏁 {p["name"]} 达成目标！（第 {len(self.finish_order)} 位）')
             # N 人局：只剩 1 人未达成（即 N-1 人完成）时，游戏才结束
             active = [q for q in self.players.values()
-                      if not (q['goal_done'] and q['score'] >= WIN_SCORE)]
+                      if not (q['position'] == q['secret'] and q['score'] >= WIN_SCORE)]
             if len(active) <= 1:
                 self.state = 'finished'
                 self.winner = self.finish_order[0]
@@ -256,9 +255,9 @@ class GameRoom:
         conn = self.connected_pids()
         if not conn:
             return
-        # 已达成目标的玩家轮空，不再参与回合轮转
+        # 已达成目标（停在秘密目的地且分数达标）的玩家轮空，不再参与回合轮转
         done = {pid for pid, q in self.players.items()
-                if q['goal_done'] and q['score'] >= WIN_SCORE}
+                if q['position'] == q['secret'] and q['score'] >= WIN_SCORE}
         pool = [pid for pid in conn if pid not in done] or conn
         idx = pool.index(self.current_pid) if self.current_pid in pool else -1
         self.current_pid = pool[(idx + 1) % len(pool)]
