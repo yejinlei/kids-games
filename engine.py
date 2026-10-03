@@ -272,15 +272,33 @@ class GameRoom:
         self._claims(p, path)
 
     def auto_play(self, token):
-        """超时自动行动：未掷骰则自动掷，然后结束回合（不自动移动）。"""
+        """超时自动行动：
+        - 还没掷骰：自动掷；
+        - 已掷但未移动：自动走一步（引擎内部会结算并结束回合）；
+        - 实在无路可走：跳过本回合（结束回合）。
+        """
         if token != self.turn_token or self.state != 'playing':
             return
-        try:
-            if self.phase == 'roll':
-                self.roll(self.current_pid)
-        except GameError:
-            pass
-        self._advance()
+        pid = self.current_pid
+        p = self.players.get(pid)
+        if not p:
+            return
+        if self.phase == 'roll':
+            try:
+                self.roll(pid)
+            except GameError:
+                pass
+        if self.state == 'playing' and self.phase == 'move':
+            moves = self.reachable_moves(pid)
+            if moves:
+                try:
+                    self.move(pid, moves[0]['to'])
+                    self.log.append(f'⏰ {p["name"]} 超时，自动前进了一步')
+                except GameError:
+                    pass
+        # 若回合仍未结束（没走成），则正常结束本回合
+        if self.state == 'playing' and self.phase != 'roll':
+            self._advance()
 
     # ---------- 序列化 ----------
     def serialize(self, viewer_pid=None):
