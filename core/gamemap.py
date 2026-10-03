@@ -53,8 +53,17 @@ class GameMap:
                  colors=None, wild=WILD, dice_faces=None, start_city=None,
                  land=None, dice_per_turn=DICE_PER_TURN, win_score=10,
                  projection=None, canvas_w=CANVAS_W, canvas_h=CANVAS_H,
-                 pad=CANVAS_PAD):
+                 pad=CANVAS_PAD, city_info=None, features=None,
+                 medal_cities=3, medal_score=2, shared_cards=3):
         self.name = name
+        # 桌面翻开的城市卡数量：正版为 3 张；城市很多的大棋盘需要多翻几张，否则得分太慢
+        self.SHARED_N = max(1, int(shared_cards))
+        # city_info：城市知识卡（地理 / 历史 / 风土 / 问答题），旅游学习用
+        self.CITY_INFO = dict(city_info or {})
+        # features：可选玩法开关（culture=知识卡问答, passport=护照印章, medal=大洲奖章）
+        self.FEATURES = set(features or [])
+        self.MEDAL_CITIES = max(2, int(medal_cities))
+        self.MEDAL_SCORE = max(1, int(medal_score))
         self.CITY_GEO = dict(city_geo or {})
         self.CITY_POINTS = dict(city_points or {})
         self.ROUTES = list(routes or [])
@@ -142,6 +151,11 @@ class GameMap:
             'dice_faces': self.DICE_FACES,
             'dice_per_turn': self.DICE_PER_TURN,
             'win_score': self.WIN_SCORE,
+            'city_info': self.CITY_INFO,
+            'features': sorted(self.FEATURES),
+            'medal_cities': self.MEDAL_CITIES,
+            'medal_score': self.MEDAL_SCORE,
+            'shared_n': self.SHARED_N,
         }
 
     # ---------- 数据自检 ----------

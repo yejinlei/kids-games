@@ -25,6 +25,10 @@
       min-height: 100vh;
     }
     .hidden { display: none !important; }
+    /* 游戏进行中：页面锁定一屏（无滚动条），topbar + 游戏区正好占满视口 */
+    body.in-game { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+    body.in-game .topbar { flex: 0 0 auto; position: static; }
+    body.in-game #game { flex: 1; min-height: 0; height: auto; }
     .topbar {
       display: flex; align-items: center; justify-content: space-between;
       padding: 12px 20px; background: #fff; box-shadow: var(--shadow);
@@ -35,7 +39,7 @@
       background: #eef6ff; color: #2b6cb0; padding: 6px 12px; border-radius: 999px;
       font-weight: 700; font-size: 14px;
     }
-    .screen { padding: 20px; max-width: 1600px; margin: 0 auto; }
+    .screen { padding: 20px; max-width: 1800px; margin: 0 auto; }
     .lobby-card {
       background: var(--panel); border-radius: 20px; padding: 28px;
       box-shadow: var(--shadow); max-width: 480px; margin: 30px auto;
@@ -62,6 +66,7 @@
     .btn.primary { background: var(--primary); color: #fff; }
     .btn.primary:hover { background: var(--primary-d); }
     .btn.ghost { background: #fff; border: 1.5px solid var(--line); margin-top: 10px; }
+    .btn.filter-on { background: var(--primary); color: #fff; border-color: var(--primary); }
     .btn:disabled { opacity: .5; cursor: not-allowed; }
     .msg { text-align: center; color: var(--primary-d); margin-top: 14px; font-weight: 700; }
     .conn-badge {
@@ -88,26 +93,39 @@
     .room-item:hover { border-color: var(--primary, #ff6b35); background: #fff7f3; }
     .room-item .rid { font-weight: 800; font-size: 16px; letter-spacing: 2px; }
     .room-item .meta { color: #777; font-size: 12px; }
+    /* 进行中/已满/已结束的房间：灰显列出，保证玩家找得到自己的房间 */
+    .room-item.dim { opacity: .55; cursor: not-allowed; background: #f6f7f9; }
+    .room-item.dim:hover { border-color: var(--line); background: #f6f7f9; }
+    .room-dim-head { font-size: 12px; color: #999; text-align: center; padding: 2px 0; }
     .room-empty { text-align: center; color: #999; font-size: 13px; padding: 12px; }
 
-    #game { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
-    .board-wrap {
-      background: var(--panel); border-radius: 20px; padding: 16px; box-shadow: var(--shadow);
+    /* 游戏界面：整体锁定在一屏内（无页面滚动条）；
+       左侧地图铺满剩余空间，右侧侧边栏内部自行伸缩 */
+    #game {
+      display: grid; grid-template-columns: minmax(0, 1fr) 640px; gap: 12px;
+      height: 100vh; max-width: none; padding: 12px; box-sizing: border-box;
+      overflow: hidden; align-items: stretch;
+      /* body.in-game 是 flex 列布局：.screen 的 margin:auto 会让本块收缩居中，
+         必须显式占满整行，地图才能铺满剩余宽度 */
+      width: 100%; margin: 0;
     }
-    .board-wrap svg { background: #e3f1fb; border-radius: 14px; display: block; width: 100%; max-width: 1500px; margin: 0 auto; }
+    .board-wrap {
+      background: var(--panel); border-radius: 20px; padding: 12px; box-shadow: var(--shadow);
+      display: flex; flex-direction: column; min-width: 0; min-height: 0;
+    }
+    .board-wrap svg { background: #e3f1fb; border-radius: 14px; display: block; width: 100%; height: 100%; }
     /* 球面视图：Canvas 绘制的可旋转地球（零依赖，离线可用） */
-    .globe { display: block; width: 100%; aspect-ratio: 1000 / 720; max-width: 1500px;
-      margin: 0 auto; border-radius: 14px; background: #cfe9f4; cursor: grab; touch-action: none; }
+    .globe { display: block; width: 100%; height: 100%;
+      border-radius: 14px; background: #cfe9f4; cursor: grab; touch-action: none; }
     .globe.dragging { cursor: grabbing; }
     .globe.hidden { display: none; }
     .board.dark + .globe { background: #0f1d33; }
     .land { fill: #eef6ea; stroke: #a9c0a4; stroke-width: 1.5; stroke-linejoin: round; }
-    .route { stroke-width: 4; opacity: .5; }
-    .route.reach { opacity: 1; stroke-width: 6; stroke-dasharray: 2 6; }
-    .city-label { font-size: 13px; fill: #333; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+    .route { opacity: .5; }
+    .route.reach { opacity: 1; }
     .city.reach .city-circle { stroke: var(--primary, #ff6b35); stroke-width: 3; }
     .city-label .cost { fill: var(--primary, #ff6b35); font-size: 9px; font-weight: 800; }
-    .move-path { fill: none; stroke: #ff6b35; stroke-width: 4; stroke-linecap: round; opacity: .85; }
+    .move-path { fill: none; stroke: #ff6b35; stroke-width: calc(2.6px / var(--zs, 1)); stroke-linecap: round; opacity: .85; }
     .move-hint { text-align: center; margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--primary-d, #c2410c); }
     /* 旗杆 + 旗帜定位标记（所有玩家统一） */
     .pawn-pole { opacity: .9; }
@@ -121,12 +139,16 @@
     .city.shared .city-circle { fill: #fff3cd; stroke: #e0a800; }
     .city.secret .city-circle { stroke: #9b59b6; stroke-width: 3; stroke-dasharray: 3 2; }
     .board-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    /* head-right 里的按钮必须收掉全局 .btn 的 width:100%，否则竖着堆叠把头部撑到一百多像素；
+       同时收掉 .btn.ghost 的 margin-top:10px，否则三个按钮比下拉框/计时器低 10px 不对齐 */
+    .board-head .btn { width: auto; flex: 0 0 auto; margin: 0; }
+    .head-right { display: flex; align-items: center; gap: 8px; }
     .turn-info { font-weight: 800; font-size: 16px; }
-    .timer { background: #fff3cd; color: #8a6d00; padding: 4px 12px; border-radius: 999px; font-weight: 800; }
+    .timer { background: #fff3cd; color: #8a6d00; padding: 6px 12px; border-radius: 999px; font-weight: 800; font-size: 13px; }
     .board {
       position: relative; width: 100%; aspect-ratio: 1000 / 720;
       background: linear-gradient(180deg, #d6ecff, #eaf6ff);
-      border-radius: 16px; overflow: hidden;
+      border-radius: 16px; overflow: hidden; touch-action: none; /* 允许在地图上拖动平移 */
     }
     .board svg { width: 100%; height: 100%; display: block; }
     .head-right { display: flex; align-items: center; gap: 8px; }
@@ -141,13 +163,59 @@
     .board.dark .city-circle { stroke: #33425a; }
     .board.dark .city-label { fill: #e8eef6; stroke: #0a1322; }
     .board.dark .pawn-other-tag { fill: #cdd6e2; stroke: #0a1322; }
+    /* 出发城市栏：单行紧凑（select 收掉全局 width:100%，否则整栏被撑到几十像素高） */
+    .start-bar {
+      display: flex; align-items: center; gap: 8px; margin-top: 8px;
+      padding: 6px 10px; border-radius: 10px; background: #f2f7fc; font-size: 13px; font-weight: 700;
+    }
+    .start-bar select { width: auto; flex: 0 0 auto; padding: 5px 8px; font-size: 13px; }
+    .start-bar .sbar-tip { font-size: 11px; color: var(--muted); font-weight: 400; }
     .action-bar {
-      display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap;
-      position: sticky; bottom: 0; background: var(--panel);
-      padding: 10px 0 6px; z-index: 6;
+      display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap;
+      padding: 8px 0 2px; border-top: 1px dashed var(--line);
     }
     .action-bar .btn { width: auto; flex: 1; }
-    .board-area { position: relative; }
+    .board-area { position: relative; flex: 1; min-height: 0; }
+    /* 平面地图与球面的公共容器：占满 header 与按钮栏之间的全部空间
+       （.board 自带 width:100% + aspect-ratio，绝对定位下会把高度撑回 1000:720 造成溢出，须一并覆盖） */
+    .board-area .board, .board-area .globe {
+      position: absolute; inset: 0; width: auto; height: auto; aspect-ratio: auto;
+    }
+    /* canvas 没有“内容高度”可撑，必须显式铺满（尺寸变化时由 JS 按 clientWidth/Height 重绘） */
+    .board-area .globe { width: 100%; height: 100%; }
+    /* three.js 贴图地球：与 2D 覆盖层同位置同尺寸，后者叠在上面画航线/城市/棋子 */
+    .board-area .globe3d { position: absolute; inset: 0; width: 100%; height: 100%;
+      border-radius: 14px; display: block; background: transparent; }
+    /* 贴图地球模式下 2D 层只做覆盖，必须透明，否则会盖住底下的 WebGL */
+    .board-area .globe.overlay { background: transparent; }
+    /* 球面风格切换：只影响本机画面（写 localStorage，不下发给他人） */
+    .globe-style {
+      width: auto; padding: 5px 10px; font-size: 13px; font-weight: 700;
+      border: 1.5px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
+      margin-top: 0; align-self: center; height: auto;
+    }
+    /* 平面地图缩放控件：右上角 + / - / *（回到我所在的位置） */
+    .map-zoom {
+      position: absolute; top: 10px; right: 10px; z-index: 7;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .map-zoom .zbtn {
+      width: 32px; height: 32px; border-radius: 10px; border: 1px solid #c9d6e4;
+      background: rgba(255,255,255,.94); color: #243447; font-size: 18px; font-weight: 800;
+      line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(31,43,61,.18);
+      display: flex; align-items: center; justify-content: center; padding: 0;
+    }
+    .map-zoom .zbtn:hover { background: #fff; }
+    .map-zoom .zbtn:active { transform: scale(.92); }
+    .map-zoom .zbtn.star { font-size: 24px; }
+    .map-zoom .ztag {
+      font-size: 11px; font-weight: 700; color: #5b6c82;
+      background: rgba(255,255,255,.88); border-radius: 999px; padding: 1px 7px;
+    }
+    .board-area.dark .map-zoom .zbtn {
+      background: rgba(28,44,68,.95); color: #e8eef6; border-color: #3a5273;
+    }
+    .board-area.dark .map-zoom .ztag { background: rgba(20,34,54,.92); color: #c8d4e4; }
     .dice-area {
       position: absolute; right: 14px; bottom: 14px; z-index: 5;
       display: flex; gap: 10px; justify-content: flex-end; pointer-events: none;
@@ -158,9 +226,37 @@
     }
     .die.wild { background: #444; }
 
-    .sidebar { display: flex; flex-direction: column; gap: 14px; }
-    .panel { background: var(--panel); border-radius: 16px; padding: 14px; box-shadow: var(--shadow); }
-    .panel h3 { margin: 0 0 10px; font-size: 15px; }
+    .sidebar {
+      display: flex; flex-direction: column; gap: 6px;
+      min-height: 0; overflow: hidden;    /* 高度锁在一屏内，不出现外层滚动条 */
+    }
+    .sidebar .panel { padding: 8px 11px; min-height: 0; flex: 0 1 auto; overflow-y: auto; }
+    /* 可折叠面板：点标题收起/展开（次要信息默认收起，保证聊天等区域有高度） */
+    .sidebar .panel h3 { cursor: pointer; user-select: none; }
+    .sidebar .panel h3::after { content: '▾'; float: right; color: var(--muted); font-size: 11px; }
+    .sidebar .panel.collapsed h3::after { content: '▸'; }
+    .sidebar .panel.collapsed > :not(h3) { display: none !important; }
+    .sidebar .panel.collapsed > h3:not(:first-of-type) { display: none !important; }
+    /* 内容放不下时面板内部滚动，但滚动条全部隐藏（滚轮/拖拽仍可滚动），界面保持无滚动条 */
+    .sidebar .panel::-webkit-scrollbar { display: none; }
+    .sidebar .panel { scrollbar-width: none; }
+    .sidebar .panel h3 { margin: 0 0 6px; font-size: 13px; }
+    .sidebar .tip { font-size: 11px; margin-top: 6px; }
+    /* 可伸缩面板：聊天 / 护照 / 日志瓜分剩余高度；收起的面板不再参与分配。
+       聊天有 min-height 保底：标题 + 消息区 + 输入行必须完整可见 */
+    .sidebar .panel.grow { flex: 1 1 0; display: flex; flex-direction: column; }
+    .sidebar .panel.collapsed { flex: 0 0 auto; }
+    .sidebar .panel.grow#chatPanel { flex-grow: 3; min-height: 112px; overflow: hidden; }
+    .sidebar .panel.grow .chat,
+    .sidebar .panel.grow .log { flex: 1; min-height: 40px; max-height: none; }
+    /* 侧栏加宽后用多列排布，信息全部摊开显示（不再为了省高度而压缩） */
+    .sidebar .player-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+    .sidebar .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+    .sidebar .tickets { display: flex; flex-wrap: wrap; }
+    /* 侧栏加宽后可以显示完整信息，不再压缩字号（宽度够，信息不必折叠） */
+    .sidebar #leaveBtn { padding: 8px 12px; font-size: 13px; margin-top: 0; }
+    .panel { background: var(--panel); border-radius: 16px; padding: 12px; box-shadow: var(--shadow); flex-shrink: 0; }
+    .panel h3 { margin: 0 0 8px; font-size: 14px; }
     .player-list { display: flex; flex-direction: column; gap: 8px; }
     .player {
       display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px 10px; border-radius: 12px;
@@ -176,9 +272,9 @@
     .cards { display: flex; gap: 8px; flex-wrap: wrap; }
     .cardchip {
       background: #fff7e6; border: 1.5px solid #ffd591; border-radius: 12px;
-      padding: 8px 10px; text-align: center; min-width: 64px;
+      padding: 8px 10px; text-align: center; min-width: 64px; max-width: 136px;
     }
-    .cardchip .ccity { font-weight: 800; font-size: 14px; }
+    .cardchip .ccity { font-weight: 800; font-size: 13px; line-height: 1.25; }
     .cardchip .cpts { font-size: 12px; color: var(--primary-d); font-weight: 700; }
     .cardchip.empty { color: var(--muted); border-style: dashed; background: #fafafa; }
     .cardchip { position: relative; text-align: center; }
@@ -194,34 +290,109 @@
     }
     .ticket .swatch { width: 12px; height: 12px; border-radius: 3px; }
     .ticket.wild { background: #eee; }
+    /* 房间聊天：消息区可滚动，输入行固定在下方 */
+    .chat {
+      max-height: 190px; overflow-y: auto; font-size: 13px; line-height: 1.5;
+      display: flex; flex-direction: column; gap: 6px; padding-right: 2px;
+    }
+    .chat .msg {
+      display: flex; align-items: flex-start; gap: 6px;
+      padding: 5px 8px; border-radius: 10px; background: #f2f7fc; word-break: break-all;
+    }
+    .chat .msg.mine { background: #fff2ec; }
+    .chat .msg .who { font-weight: 800; color: var(--ink); flex-shrink: 0; }
+    .chat .msg .txt { color: #46566a; }
+    .chat .msg .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+    .chat .chat-empty { color: var(--muted); font-size: 12px; padding: 4px 2px; }
+    .chat-send { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }
+    /* 覆盖全局 input/select 的 width:100%，否则输入框会被按钮挤成一条缝 */
+    .chat-send input { flex: 1 1 auto; width: auto; min-width: 0; font-size: 13px; padding: 8px 10px; }
+    /* .btn 默认 width:100%，这里必须收掉，否则按钮会撑满整行把输入框挤没 */
+    .chat-send .btn { margin-top: 0; flex: 0 0 auto; width: auto; padding: 8px 14px; font-size: 13px; }
     .log {
       max-height: 180px; overflow-y: auto; font-size: 13px; color: #46566a; line-height: 1.5;
       display: flex; flex-direction: column; gap: 4px;
     }
     .log div { padding: 2px 0; border-bottom: 1px dashed #eef2f7; }
 
-    .route { stroke-width: 1.4; stroke-linecap: round; opacity: .65; }
-    .route.reach { stroke-width: 4; opacity: 1; filter: drop-shadow(0 0 4px #ffb300); }
+    /* 线宽随缩放恒定：svg 根元素带 --zs = 当前倍率（renderBoard 里设置）。
+       放大 N 倍时 1 个 SVG 单位 = N 屏幕像素，所以要用「除以」倍率，屏幕上线宽才不变 */
+    .route { stroke-width: calc(1px / var(--zs, 1)); stroke-linecap: round; opacity: .55; }
+    .route.reach { stroke-width: calc(2.4px / var(--zs, 1)); opacity: 1; filter: drop-shadow(0 0 3px #ffb300); }
     .city-node { cursor: default; }
-    .city-circle { stroke: #fff; stroke-width: 2; }
+    .city-circle { stroke: #fff; stroke-width: calc(2px / var(--zs, 1)); }
     .city-label { font-size: 11px; font-weight: 400; fill: #2c3e50; paint-order: stroke;
       stroke: #fff; stroke-width: 2.5px; pointer-events: none; }
-    .city.reach .city-circle { stroke: #ffb300; stroke-width: 4; cursor: pointer; }
-    .city.shared .city-circle { stroke: #ff7a59; stroke-width: 4; }
-    .city.secret .city-circle { stroke: #2ecc71; stroke-width: 4; stroke-dasharray: 4 3; }
+    .city.reach .city-circle { stroke: #ffb300; stroke-width: calc(4px / var(--zs, 1)); cursor: pointer; }
+    .city.shared .city-circle { stroke: #ff7a59; stroke-width: calc(4px / var(--zs, 1)); }
+    .city.secret .city-circle { stroke: #2ecc71; stroke-width: calc(4px / var(--zs, 1)); stroke-dasharray: 4 3; }
     .toast {
       position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
       background: #2c3e50; color: #fff; padding: 10px 18px; border-radius: 999px;
       font-weight: 700; box-shadow: var(--shadow); z-index: 50;
     }
     /* 地图优先：宽度不足时侧边栏移到地图下方，并横向排布，保证地图尽量大 */
-    @media (max-width: 1500px) {
+    @media (max-width: 1100px) {
       #game { grid-template-columns: 1fr; }
       .sidebar {
         display: grid; gap: 16px; align-items: start;
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        position: static; max-height: none; overflow: visible; padding: 0;
       }
     }
+    /* ---------- 城市知识卡：地理 / 历史 / 风土 + 知识问答 ---------- */
+    .cmask {
+      position: fixed; inset: 0; background: rgba(12, 20, 32, .55); z-index: 60;
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .ccard {
+      background: var(--panel); border-radius: 18px; box-shadow: var(--shadow);
+      max-width: 540px; width: 100%; max-height: 88vh; overflow: auto; padding: 18px 20px;
+    }
+    .ccard h2 { margin: 0; font-size: 21px; }
+    .ccard .csub { color: var(--muted); font-size: 13px; margin: 2px 0 12px; }
+    .csec { border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 10px; }
+    .csec .lab { font-weight: 800; font-size: 13px; margin-bottom: 4px; }
+    .csec p { margin: 0; font-size: 14px; line-height: 1.65; }
+    .cfacts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 13px; margin-top: 6px; }
+    .quiz { margin-top: 12px; background: #fff8ec; border: 1px solid #f3d9a4; border-radius: 12px; padding: 12px; }
+    /* ---------- 一局结束：战报 + 再来一局 ---------- */
+    .end-board { margin: 14px 0 4px; display: flex; flex-direction: column; gap: 6px; }
+    .end-row {
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      border-radius: 10px; background: #f7f9fc; font-size: 14px;
+    }
+    .end-row.first { background: #fff7e6; border: 1.5px solid #ffd591; }
+    .end-row .muted { color: var(--muted); font-size: 12px; margin-left: auto; }
+    .end-actions { display: flex; gap: 10px; margin-top: 14px; }
+    .end-actions .btn { flex: 1; margin-top: 0; }
+    .quiz .qtitle { font-weight: 800; font-size: 14px; margin-bottom: 8px; }
+    .quiz .opt {
+      display: block; width: 100%; text-align: left; margin: 6px 0; padding: 9px 12px;
+      border-radius: 10px; border: 1px solid var(--line); background: #fff;
+      cursor: pointer; font-size: 14px; font-family: inherit;
+    }
+    .quiz .opt:hover { border-color: #f0a34a; background: #fff6e8; }
+    .quiz .opt.right { background: #e8f8ee; border-color: #43c07a; font-weight: 700; }
+    .quiz .opt.wrong { background: #fdecec; border-color: #e07070; }
+    .quiz .why { margin-top: 8px; font-size: 13px; line-height: 1.6; }
+    .cbtns { display: flex; gap: 10px; margin-top: 14px; }
+    /* ---------- 护照：印章 / 奖章 / 历史时间轴 ---------- */
+    .stampgrid { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+    .stamp {
+      font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #eef4ff;
+      border: 1px solid #cfe0f7; cursor: pointer;
+    }
+    .stamp:hover { background: #e2edff; }
+    .medal {
+      display: inline-block; font-size: 12px; padding: 3px 9px; border-radius: 999px;
+      background: #fff3cd; border: 1px solid #e6c76a; margin: 2px 4px 2px 0;
+    }
+    .zone-line { font-size: 12px; color: var(--muted); margin: 8px 0 0; font-weight: 700; }
+    .tl { font-size: 13px; margin-top: 4px; }
+    .tl .row { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px dotted var(--line); }
+    .tl .yr { font-weight: 800; min-width: 88px; color: var(--muted); }
+    .pmetal { font-size: 11px; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -302,6 +473,13 @@
         </label>
       </div>
 
+      <!-- 出发城市：仅当该棋盘允许自选时才显示（默认 北京，可选 🎲 随机） -->
+      <div class="row hidden" id="startRow">
+        <label>出发城市
+          <select id="startCitySelect"></select>
+        </label>
+      </div>
+
       <div class="btn-group">
         <button id="createBtn" class="btn primary">创建房间</button>
       </div>
@@ -346,17 +524,37 @@
       <div class="board-head">
         <span id="turnInfo" class="turn-info">准备中…</span>
         <span class="head-right">
+          <button id="cardOnlyBtn" class="btn ghost small hidden" title="只看城市卡上的城市（再点还原全部城市）">👁 只看卡</button>
           <button id="viewBtn" class="btn ghost small hidden" title="切换平面地图 / 球面地球">🗺 平面</button>
+          <select id="globeStyleSel" class="globe-style hidden"
+                  title="球面风格（只影响你自己的画面，不影响其他玩家）">
+            <option value="real">🌏 写实地球</option>
+            <option value="night">🌌 星空夜景</option>
+            <option value="carto">🎨 明亮卡通</option>
+          </select>
           <button id="themeBtn" class="btn ghost small" title="切换主题（亮色 / 暗色）">🌞 亮色</button>
           <span id="timerInfo" class="timer hidden"></span>
         </span>
       </div>
       <div class="board-area">
         <div id="board" class="board"></div>
+        <!-- 球面：three.js 贴图地球（WebGL，在下） + 航线/城市/棋子的 2D 覆盖层（在上） -->
+        <canvas id="globe3d" class="globe3d hidden"></canvas>
         <canvas id="globe" class="globe hidden"></canvas>
+        <div id="mapZoom" class="map-zoom">
+          <button id="zoomInBtn" class="zbtn" title="放大地图">+</button>
+          <button id="zoomOutBtn" class="zbtn" title="缩小地图">−</button>
+          <button id="zoomMeBtn" class="zbtn star" title="回到我所在的位置">*</button>
+          <span id="zoomTag" class="ztag">1.0×</span>
+        </div>
         <div id="diceArea" class="dice-area"></div>
       </div>
       <div id="moveHint" class="move-hint hidden"></div>
+      <div id="startCityBar" class="start-bar hidden">
+        <span>🛫 出发城市</span>
+        <select id="startCitySelect2"></select>
+        <span id="startCityTag" class="sbar-tip"></span>
+      </div>
       <div class="action-bar">
         <button id="addBotBtn" class="btn hidden">🤖 添加机器人</button>
         <button id="removeBotBtn" class="btn ghost hidden">移除机器人</button>
@@ -371,8 +569,18 @@
         <h3>玩家</h3>
         <div id="playerList" class="player-list"></div>
       </div>
+      <div class="panel grow" id="chatPanel">
+        <h3>💬 房间聊天</h3>
+        <div id="chatBox" class="chat"></div>
+        <div class="chat-send">
+          <input id="chatInput" type="text" maxlength="200" autocomplete="off"
+                 placeholder="聊点什么…（回车发送）">
+          <button id="chatSendBtn" class="btn primary small">发送</button>
+        </div>
+        <p class="tip">房间内所有人可见，单条最多 200 字。</p>
+      </div>
       <div class="panel">
-        <h3>城市卡（每人 4 张）</h3>
+        <h3 id="cardsTitle">城市卡</h3>
         <div id="sharedCards" class="cards"></div>
         <p class="tip">①②③ 为<b>公共卡</b>，所有人可见——只有本回合移动后<b>停留的城市</b>与卡面相同，才能获得该卡分数（取走后翻开新卡）。<br/>④ 为你的<b>秘密目的地</b>，只有你自己看得到；别人只能看到一张背面 🎴。</p>
       </div>
@@ -380,13 +588,37 @@
         <h3>我的车票</h3>
         <div id="ticketBox" class="tickets"></div>
       </div>
-      <div class="panel">
+      <div class="panel grow hidden" id="passportPanel">
+        <h3>🛂 我的护照</h3>
+        <div id="passportBox"></div>
+        <div id="medalBox"></div>
+        <h3 style="margin-top:14px">🕰 我的历史时间轴</h3>
+        <div id="timelineBox" class="tl"></div>
+        <p class="tip" id="quizStat"></p>
+      </div>
+      <div class="panel grow" id="logPanel">
         <h3>游戏日志</h3>
         <div id="logBox" class="log"></div>
       </div>
       <button id="leaveBtn" class="btn ghost">退出房间</button>
     </aside>
   </main>
+
+  <div id="cityModal" class="cmask hidden"><div class="ccard" id="cityCard"></div></div>
+
+  <!-- 一局结束：战报 + 询问再来一局 -->
+  <div id="endMask" class="cmask hidden">
+    <div class="ccard">
+      <h2 id="endTitle">🎉 游戏结束</h2>
+      <div class="csub">本局战报（按得分排名）</div>
+      <div id="endBoard" class="end-board"></div>
+      <div class="end-actions">
+        <button id="rematchBtn" class="btn primary">🔁 再来一局</button>
+        <button id="endLeaveBtn" class="btn ghost">🏠 退出房间</button>
+      </div>
+      <div id="endWait" class="tip hidden"></div>
+    </div>
+  </div>
 
   <div id="toast" class="toast hidden"></div>
 
@@ -401,6 +633,7 @@
 //# sourceMappingURL=socket.io.min.js.map
 
   </script>
+  <script src="/static/vendor/three.min.js"></script>
   <script>
     /* 应用逻辑（内联，避免代理拦截外部 js/css） */
     function startApp() {
@@ -409,6 +642,7 @@
       const STORE_KEY = GAME_ID + '_trip';
       const SERVER_KEY = GAME_ID + '_trip_server';
       const VIEW_KEY = GAME_ID + '_view';
+      const CARD_KEY = GAME_ID + '_card_only';    // "只看城市卡的城市"开关（平面 / 球面共用）
       let socket = null;
       let MAP = null;
       let ADJ = {};
@@ -416,12 +650,19 @@
       let LAND_PATHS = [];   // 陆地轮廓 SVG 路径（平面视图，可含多个多边形）
       let GAME_SPEC = null;  // 该棋元信息：可用视图、可选规则
       let viewMode = 'flat'; // flat=平面地图 | globe=可旋转球面
+      let cardOnly = false;  // 开启后地图上只显示城市卡上的城市（两个视图共用）
       let state = null;
       let myPid = null;
       let myRoom = null;
       let joined = false;
       let timerLeft = 0;
       let timerInt = null;
+      let CITY_INFO = {};        // 城市知识库（地理/历史/风土/问答），由地图接口下发
+      let lastQuizCity = null;   // 已经弹过的知识题城市，避免重复打扰
+      // 平面视图的"镜头"：SVG 的 viewBox（x, y, 宽, 高），缩放=缩小视野，平移=移动视野
+      const VW = 1000, VH = 720;
+      let view = { x: 0, y: 0, w: VW, h: VH };
+      let panned = false;        // 刚刚拖动过地图，这一下 click 不当作"点城市"
 
       const $ = (id) => document.getElementById(id);
       const lobby = $('lobby'), game = $('game');
@@ -431,6 +672,8 @@
       function showScreen(name) {
         lobby.classList.toggle('hidden', name !== 'lobby');
         game.classList.toggle('hidden', name !== 'game');
+        // 进入游戏界面时锁定整页为一屏（配合 body.in-game 的 CSS）
+        document.body.classList.toggle('in-game', name === 'game');
       }
       function toast(msg) {
         const t = $('toast');
@@ -476,6 +719,7 @@
         }
         if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + (res.statusText || ''));
         MAP = await res.json();
+        CITY_INFO = MAP.city_info || {};
         ADJ = {}; POS = {};
         MAP.cities.forEach(function (c) {
           ADJ[c.name] = [];
@@ -494,6 +738,8 @@
         });
         placeLabels();
         buildGlobeDots();
+        // 地图就绪后才能填出"城市列表"版的出发城市下拉
+        fillStartCitySelects(GAME_SPEC && GAME_SPEC.options ? GAME_SPEC.options.start_city : null);
       }
 
       // 载入该棋的元信息（名称 / 可用视图 / 可选规则）
@@ -539,6 +785,36 @@
           if (!a) row.querySelector('#winScoreSelect').closest('label').classList.add('hidden');
           if (!b) row.querySelector('#stepsSelect').closest('label').classList.add('hidden');
         }
+        fillStartCitySelects(opts.start_city);
+      }
+
+      // ---------- 出发城市：房主可选 / 🎲 随机 ----------
+      function startCityOptions(spec) {
+        // spec 形如 ['cities', 'random']：'cities'=城市列表，'random'=随机项
+        if (!spec || spec.indexOf('random') < 0 && spec.indexOf('cities') < 0) return null;
+        const opts = [];
+        if (spec.indexOf('random') >= 0) opts.push({ v: 'random', t: '🎲 随机（开局揭晓）' });
+        if (spec.indexOf('cities') >= 0 && MAP && MAP.cities) {
+          MAP.cities.forEach(function (c) { opts.push({ v: c.name, t: c.name }); });
+        }
+        return opts.length ? opts : null;
+      }
+
+      function fillStartCitySelects(spec) {
+        const opts = startCityOptions(spec);
+        ['startCitySelect', 'startCitySelect2'].forEach(function (id) {
+          const sel = $(id);
+          if (!sel) return;
+          if (!opts) { sel.closest('.row, .start-bar').classList.add('hidden'); return; }
+          sel.innerHTML = opts.map(function (o) {
+            return '<option value="' + o.v + '"' + (o.v === (MAP.start || '北京') ? ' selected' : '') + '>' +
+              esc(o.t) + '</option>';
+          }).join('');
+        });
+        const row = $('startRow');
+        if (row) row.classList.toggle('hidden', !opts);
+        const bar = $('startCityBar');
+        if (bar) bar.classList.toggle('hidden', !opts);
       }
 
       // 城市名标签避让：为每座城市挑一个不与已有标签重叠的位置
@@ -607,6 +883,196 @@
         ctx.globalAlpha = 1;
       }
 
+      // ---------- 球面风格：three.js 贴图地球（写实 / 星空夜景 / 明亮卡通）----------
+      // 三种风格只影响本机画面（存 localStorage，不下发给服务端），每个玩家可各看各的。
+      // three.js 没加载成功或 WebGL 不可用时，自动回退到下面的 Canvas 2D 地球（点阵大陆）。
+      const GLOBE_STYLE_KEY = 'shanhe_globe_style';
+      let globeStyle = 'real';
+      try { globeStyle = localStorage.getItem(GLOBE_STYLE_KEY) || 'real'; } catch (e) {}
+      const TEX = {};          // 贴图缓存
+      let LAND_WORLD = null;   // 真实海岸线（卡通贴图用，按需拉取一次）
+
+      function texUrl(f) { return '/static/textures/' + f; }
+
+      // three 球体的 u=0 落在经度 -90°，而标准等距圆柱贴图（u=(lon+180)/360）
+      // 要把贴图整体右移 90°（offset +0.25）才能和城市经纬度对上，否则城市会偏 90° 经度
+      const TEX_U_OFFSET = 0.25;
+      function fixEquirectUV(t) {
+        t.wrapS = THREE.RepeatWrapping;
+        t.offset.x = TEX_U_OFFSET;
+        return t;
+      }
+
+      function loadTex(name, file, srgb) {
+        if (TEX[name]) return TEX[name];
+        const t = new THREE.TextureLoader().load(texUrl(file), function () {
+          GLOBE.dirty = true; startGlobeLoop();          // 贴图到位后补一帧
+        });
+        if (srgb && THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 4;
+        fixEquirectUV(t);
+        TEX[name] = t;
+        return t;
+      }
+
+      // 只用一次大气辉光材质：菲涅尔边缘光，让球体边缘亮起来（三种风格共用，参数不同）
+      function makeAtmosphere() {
+        return new THREE.ShaderMaterial({
+          uniforms: { uColor: { value: new THREE.Color(0x7fc4ff) },
+                      uStrength: { value: 0.85 }, uPower: { value: 2.6 } },
+          vertexShader: 'varying vec3 vN; varying vec3 vP;' +
+            'void main(){ vN = normalize(normalMatrix * normal);' +
+            ' vec4 mv = modelViewMatrix * vec4(position, 1.0); vP = mv.xyz;' +
+            ' gl_Position = projectionMatrix * mv; }',
+          fragmentShader: 'uniform vec3 uColor; uniform float uStrength; uniform float uPower;' +
+            'varying vec3 vN; varying vec3 vP;' +
+            'void main(){ float f = pow(1.0 - abs(dot(normalize(vN), normalize(-vP))), uPower);' +
+            ' gl_FragColor = vec4(uColor, clamp(f, 0.0, 1.0) * uStrength); }',
+          transparent: true, blending: THREE.AdditiveBlending,
+          side: THREE.BackSide, depthWrite: false
+        });
+      }
+
+      function ensureGlobe3D() {
+        if (GLOBE.threeFailed) return false;
+        if (GLOBE.threeReady) return true;
+        if (typeof window.THREE === 'undefined') { GLOBE.threeFailed = true; return false; }
+        const cvs = $('globe3d');
+        if (!cvs) { GLOBE.threeFailed = true; return false; }
+        try {
+          GLOBE.renderer = new THREE.WebGLRenderer({ canvas: cvs, alpha: true, antialias: true });
+        } catch (e) {
+          GLOBE.threeFailed = true;                       // 无 WebGL：继续用 2D 地球
+          return false;
+        }
+        GLOBE.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+        GLOBE.scene = new THREE.Scene();
+        // 正交相机 + 像素级视锥：球半径 R 直接等于屏幕上的 R 像素，与 2D 覆盖层严格对齐
+        GLOBE.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -2000, 2000);
+        GLOBE.camera.position.z = 800;
+        GLOBE.amb = new THREE.AmbientLight(0xffffff, 0.45);
+        const dir = new THREE.DirectionalLight(0xffffff, 1);
+        dir.position.set(-0.5, 0.6, 1);                   // 主光源固定在左上（屏幕空间）
+        GLOBE.light = dir;
+        GLOBE.scene.add(GLOBE.amb, dir);
+        GLOBE.root = new THREE.Group();                   // 地球 + 大气一起缩放/平移
+        GLOBE.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64),
+                                     new THREE.MeshPhongMaterial({ color: 0xbfe0f5 }));
+        GLOBE.atm = new THREE.Mesh(new THREE.SphereGeometry(1.16, 64, 48), makeAtmosphere());
+        GLOBE.root.add(GLOBE.earth, GLOBE.atm);
+        GLOBE.scene.add(GLOBE.root);
+        GLOBE.threeReady = true;
+        applyGlobeStyle(globeStyle);
+        return true;
+      }
+
+      function applyGlobeStyle(st) {
+        globeStyle = st || globeStyle;
+        try { localStorage.setItem(GLOBE_STYLE_KEY, globeStyle); } catch (e) {}
+        if (!ensureGlobe3D()) return;                     // 回退模式：风格切换不生效
+        const earth = GLOBE.earth, uni = GLOBE.atm.material.uniforms;
+        GLOBE.scene.background = null;
+        GLOBE.amb.intensity = 0.75; GLOBE.light.intensity = 1.8;
+        GLOBE.atm.visible = true;
+        uni.uColor.value.set(0x7fc4ff); uni.uStrength.value = 0.85;
+        if (globeStyle === 'real') {
+          // 写实：NASA 蓝色弹珠日面图 + 地形凹凸 + 海洋高光
+          earth.material = new THREE.MeshPhongMaterial({
+            map: loadTex('marble', 'earth-blue-marble.jpg', true),
+            bumpMap: loadTex('topo', 'earth-topology.png', false),
+            bumpScale: 0.12,
+            specularMap: loadTex('water', 'earth-water.png', false),
+            specular: new THREE.Color(0x2b3d4f), shininess: 14
+          });
+        } else if (globeStyle === 'night') {
+          // 夜景：城市灯光贴图（自发光）+ 星空背景，大气更亮
+          earth.material = new THREE.MeshBasicMaterial({
+            map: loadTex('night', 'earth-night.jpg', true)
+          });
+          GLOBE.scene.background = loadTex('sky', 'night-sky.png', true);
+          uni.uColor.value.set(0x5aa6ff); uni.uStrength.value = 1.15;
+        } else {
+          // 卡通：用真实海岸线现画一张扁平贴图（等距圆柱投影），明亮清爽
+          earth.material = new THREE.MeshLambertMaterial({ color: 0xd9eefb });
+          // r160 物理光照单位偏暗，卡通要「明亮扁平」就得给足环境光
+          GLOBE.amb.intensity = 2.1; GLOBE.light.intensity = 0.55;
+          uni.uColor.value.set(0x9ad4ff); uni.uStrength.value = 0.5;
+          ensureCartoTexture(function (tex) {
+            if (globeStyle !== 'carto') return;
+            earth.material.map = tex; earth.material.color.set(0xffffff);
+            earth.material.needsUpdate = true;
+            GLOBE.dirty = true; startGlobeLoop();
+          });
+        }
+        GLOBE.dirty = true; startGlobeLoop();
+      }
+
+      // 卡通贴图：海洋浅蓝 + 真实海岸线陆地 + 经纬网，等距圆柱投影 2048×1024
+      function buildCartoTexture(polys) {
+        const W = 2048, H = 1024;
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const g = c.getContext('2d');
+        g.fillStyle = '#d9eefb'; g.fillRect(0, 0, W, H);
+        // 极地冰盖
+        const ice = g.createLinearGradient(0, 0, 0, H);
+        ice.addColorStop(0, 'rgba(255,255,255,.95)');
+        ice.addColorStop(0.10, 'rgba(255,255,255,0)');
+        ice.addColorStop(0.90, 'rgba(255,255,255,0)');
+        ice.addColorStop(1, 'rgba(255,255,255,.95)');
+        g.fillStyle = ice; g.fillRect(0, 0, W, H);
+        // 经纬网
+        g.strokeStyle = 'rgba(90,130,160,.22)'; g.lineWidth = 1.5;
+        for (let lon = -180; lon <= 180; lon += 30) {
+          const x = (lon + 180) / 360 * W;
+          g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+        }
+        for (let lat = -60; lat <= 60; lat += 30) {
+          const y = (90 - lat) / 180 * H;
+          g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
+        }
+        // 陆地：真实海岸线（lon/lat → 等距圆柱像素）
+        g.fillStyle = '#a9d98a'; g.strokeStyle = '#5f8f4e'; g.lineWidth = 2.5;
+        polys.forEach(function (poly) {
+          g.beginPath();
+          poly.forEach(function (p, i) {
+            const x = (p[0] + 180) / 360 * W, y = (90 - p[1]) / 180 * H;
+            if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+          });
+          g.closePath(); g.fill(); g.stroke();
+        });
+        const t = new THREE.CanvasTexture(c);
+        if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 4;
+        fixEquirectUV(t);
+        return t;
+      }
+
+      function ensureCartoTexture(cb) {
+        if (TEX.carto) { cb(TEX.carto); return; }
+        if (LAND_WORLD) { TEX.carto = buildCartoTexture(LAND_WORLD); cb(TEX.carto); return; }
+        fetch('/static/data/land.json').then(function (r) { return r.json(); })
+          .then(function (polys) {
+            LAND_WORLD = polys;
+            TEX.carto = buildCartoTexture(polys);
+            cb(TEX.carto);
+          }).catch(function () { /* 拿不到就用纯色球 */ });
+      }
+
+      // 每帧：把当前视角同步给 three.js（与 2D 覆盖层共用 cx/cy/R）
+      function renderGlobe3D(w, h, cx, cy, R) {
+        const rd = GLOBE.renderer, cam = GLOBE.camera;
+        rd.setSize(w, h, false);
+        cam.left = -w / 2; cam.right = w / 2; cam.top = h / 2; cam.bottom = -h / 2;
+        cam.updateProjectionMatrix();
+        GLOBE.root.position.set(cx - w / 2, h / 2 - cy, 0);   // 屏幕坐标 → 世界坐标
+        GLOBE.root.scale.setScalar(R);
+        // 与 2D 的 rotateVec 对齐：先绕 Y 转 yaw，再绕 X 转 pitch。
+        // 注意符号：three 的 Ry 是右手系（+z→+x），而 rotateVec 用的是相反方向，故取 -yaw
+        GLOBE.earth.rotation.set(GLOBE.pitch, -GLOBE.yaw, 0);
+        rd.render(GLOBE.scene, cam);
+      }
+
       // 初始视角对准出发城市：可证明 yaw=经度、pitch=纬度 时该点正好落在球心
       function centerGlobeOn(city) {
         if (GLOBE.init || !MAP || !MAP.geo || !city || !MAP.geo[city]) return;
@@ -614,6 +1080,16 @@
         GLOBE.yaw = g0[0] * Math.PI / 180;
         GLOBE.pitch = g0[1] * Math.PI / 180;
         GLOBE.init = true;
+      }
+
+      // 房间出发城市变了（房主指定 / 随机揭晓）就重新对准球面，保证与平面一致
+      function syncGlobeStart() {
+        const sc = currentStartCity();
+        if (!sc || GLOBE.startCity === sc) return;
+        GLOBE.startCity = sc;
+        GLOBE.init = false;
+        centerGlobeOn(sc);
+        GLOBE.dirty = true;
       }
 
       function lonLatVec(lon, lat) {
@@ -641,7 +1117,7 @@
       // 预计算陆地点阵：经纬度固定，旋转时只需重新投影，省去每帧的多边形裁剪
       function buildGlobeDots() {
         if (!MAP || GLOBE.dots.length) return;
-        centerGlobeOn(MAP.start);
+        centerGlobeOn(currentStartCity());
         const polys = MAP.land_geo || [];
         if (!polys.length) return;
         const box = polys.map(function (p) {
@@ -714,7 +1190,13 @@
         GLOBE.cx = cx; GLOBE.cy = cy; GLOBE.r = R;
         const dark = $('board').classList.contains('dark');
 
+        // 贴图地球（WebGL）可用时：球体本体交给 three.js，本层只画航线/城市/棋子
+        const use3D = ensureGlobe3D();
+        cv.classList.toggle('overlay', use3D);
+        if (use3D) renderGlobe3D(w, h, cx, cy, R);
+
         // 星空背景（暗色主题下），增强太空纵深
+        if (!use3D) {
         drawStars(ctx, w, h, dark);
 
         // 大气光晕：球体外侧一圈辉光，强化"这是一个球"的观感
@@ -772,11 +1254,10 @@
           ctx.fillRect(cx + p.x * R - s, cy + p.y * R - s, s * 2, s * 2);
         }
         ctx.globalAlpha = 1;
+        }
 
-        // 航线（大圆弧）
-        const moves = (state && state.moves) || [];
-        const reach = {};
-        moves.forEach(function (m) { reach[m.to] = true; });
+        // 航线（大圆弧）：本回合可达的那一段加粗，判定与平面视图完全一致
+        const V = cityView();
         (MAP.routes || []).forEach(function (r) {
           const ga = MAP.geo[r[0]], gb = MAP.geo[r[1]];
           if (!ga || !gb) return;
@@ -784,50 +1265,137 @@
           const k = Math.max(pa.z, pb.z);
           if (k <= 0) return;                 // 整条线都在地球背面
           const kk = Math.max(0.15, k);
-          const hot = !!reach[r[0]] || !!reach[r[1]];
+          const hot = (V.myPos === r[0] && V.reachSet.has(r[1])) ||
+                      (V.myPos === r[1] && V.reachSet.has(r[0]));
           ctx.strokeStyle = (MAP.colors[r[2]] || {}).hex || '#888';
           ctx.globalAlpha = (hot ? 0.95 : 0.3) * (0.4 + 0.6 * kk);
-          ctx.lineWidth = (hot ? 3.2 : 1.6) * (0.65 + 0.35 * kk);
+          ctx.lineWidth = (hot ? 2.4 : 1.1) * (0.65 + 0.35 * kk);
           strokePath3D(ctx, cx, cy, R, greatCircle(ga, gb, 24));
         });
         ctx.globalAlpha = 1;
 
-        // 城市与标签
+        // ---- 城市 / 标签 / 棋子：与平面视图同一套状态、颜色、优先级与避让规则 ----
         ctx.font = '600 11px system-ui, -apple-system, sans-serif';
         ctx.textAlign = 'left';
+        const items = [], pawnGroups = [];
         Object.keys(MAP.geo).forEach(function (name) {
-          const gg = MAP.geo[name];
-          const p = projectVec(gg[0], gg[1]);
-          if (p.z <= 0.03) return;
-          const d = p.z;
-          const x = cx + p.x * R, y = cy + p.y * R;
-          const hot = !!reach[name];
-          ctx.globalAlpha = 0.45 + 0.55 * d;
-          if (hot) {
-            ctx.beginPath(); ctx.arc(x, y, 10 * (0.7 + 0.3 * d), 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255,107,53,.9)'; ctx.lineWidth = 2; ctx.stroke();
-          }
-          ctx.beginPath(); ctx.arc(x, y, (hot ? 5 : 3.6) * (0.65 + 0.35 * d), 0, Math.PI * 2);
-          ctx.fillStyle = hot ? '#ff6b35' : (dark ? '#f2ead9' : '#6b5442');
-          ctx.fill();
-          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; ctx.stroke();
-          if (d > 0.32) {                     // 太靠边缘就不写名字，避免标签糊成一片
-            ctx.fillStyle = dark ? '#e8eef7' : '#243447';
-            ctx.fillText(name, x + 7, y + 4);
-          }
-          ctx.globalAlpha = 1;
+          if (!V.shown(name)) return;                    // 只看城市卡时，其余城市整座隐藏
+          const p = projectVec(MAP.geo[name][0], MAP.geo[name][1]);
+          if (p.z <= 0.03) return;                       // 背面不画
+          const d = p.z, x = cx + p.x * R, y = cy + p.y * R;
+          const f = V.flags(name);
+          items.push({ name: name, x: x, y: y, d: d, f: f, prio: V.prio(name) });
+          if (f.pawns.length) pawnGroups.push({ city: name, x: x, y: y, d: d, list: f.pawns });
         });
 
-        // 当前所在城市高亮圈
-        const mine = me();
-        if (mine && mine.position && MAP.geo[mine.position]) {
-          const gg = MAP.geo[mine.position];
-          const p = projectVec(gg[0], gg[1]);
-          if (p.z > 0) {
-            ctx.beginPath(); ctx.arc(cx + p.x * R, cy + p.y * R, 9, 0, Math.PI * 2);
-            ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 3; ctx.stroke();
+        // 棋子几何（同城多人并排，与平面一致），先算好当标签避让的障碍物
+        const pawnDraws = [], obstacles = [];
+        pawnGroups.forEach(function (g) {
+          const list = g.list.slice().sort(function (a, b) {   // 自己的棋子最后画（在最上层）
+            if (V.my && a.pid === V.my.pid) return 1;
+            if (V.my && b.pid === V.my.pid) return -1;
+            return 0;
+          });
+          const n = list.length, spread = n > 1;
+          list.forEach(function (p, i) {
+            const px = spread ? g.x + (i - (n - 1) / 2) * 14 : g.x;
+            const py = spread ? g.y - 15 : g.y;
+            const isMine = !!(V.my && p.pid === V.my.pid);
+            pawnDraws.push({ px: px, py: py, top: py - 20, p: p, isMine: isMine, d: g.d });
+            obstacles.push({ x1: px - 4, y1: py - 32, x2: px + (isMine ? 30 : 17), y2: py - 10 });
+          });
+          const others = V.my ? list.filter(function (p) { return p.pid !== V.my.pid; }) : list.slice();
+          if (others.length) {
+            g.others = others.map(function (p) {
+              return (p.name || '？') + (p.connected ? '' : '(离线)');
+            }).join('、');
+            obstacles.push({ x1: g.x - g.others.length * 5, y1: g.y + 10,
+                             x2: g.x + g.others.length * 5, y2: g.y + 22 });
           }
-        }
+        });
+
+        // 标签：LOD（放大后才全部亮名字）+ 与平面共用的避让算法
+        const lodAll = (GLOBE.zoom || 1) >= 1.5;
+        const labelItems = [];
+        items.forEach(function (it) {
+          const show = it.d > 0.18 && (lodAll || it.prio < 5);   // 太靠边缘不写名字
+          if (!show) { obstacles.push({ x1: it.x - 6, y1: it.y - 6, x2: it.x + 6, y2: it.y + 6 }); return; }
+          it.txt = it.name + (it.f.cost ? it.f.cost + '票' : '');
+          labelItems.push({ name: it.name, x: it.x, y: it.y, prio: it.prio,
+                            w: ctx.measureText(it.txt).width, h: 14 });
+        });
+        const labelPos = layoutLabels(labelItems, 1, obstacles);
+        const halo = dark ? 'rgba(10,18,32,.85)' : 'rgba(255,255,255,.9)';
+
+        // 城市点：可达橙圈 / 公共卡橙红圈 / 秘密目的地绿虚线圈 / 出发城市画大一点
+        items.forEach(function (it) {
+          const d = it.d, f = it.f;
+          ctx.globalAlpha = 0.45 + 0.55 * d;
+          if (f.reach) {
+            ctx.beginPath(); ctx.arc(it.x, it.y, 10 * (0.7 + 0.3 * d), 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,107,53,.9)'; ctx.lineWidth = 2; ctx.stroke();
+          }
+          if (f.shared) {
+            ctx.beginPath(); ctx.arc(it.x, it.y, 8.5 * (0.7 + 0.3 * d), 0, Math.PI * 2);
+            ctx.strokeStyle = '#ff7a59'; ctx.lineWidth = 2; ctx.stroke();
+          }
+          if (f.secret) {
+            ctx.beginPath(); ctx.arc(it.x, it.y, 8.5 * (0.7 + 0.3 * d), 0, Math.PI * 2);
+            ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 2;
+            ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
+          }
+          const rad = (f.start ? 5.2 : 3.6) * (0.65 + 0.35 * d);
+          ctx.beginPath(); ctx.arc(it.x, it.y, rad, 0, Math.PI * 2);
+          ctx.fillStyle = f.reach ? '#ff6b35' : (dark ? '#f2ead9' : '#6b5442');
+          ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; ctx.stroke();
+        });
+
+        // 标签（描边保证可读，与平面的白色光晕等效）
+        items.forEach(function (it) {
+          const L = labelPos[it.name];
+          if (!L) return;
+          ctx.globalAlpha = Math.min(1, 0.5 + 0.5 * it.d);
+          ctx.textAlign = L.anchor === 'middle' ? 'center' : (L.anchor === 'end' ? 'right' : 'left');
+          ctx.lineWidth = 2.5; ctx.strokeStyle = halo;
+          ctx.strokeText(it.txt, L.x, L.y);
+          ctx.fillStyle = it.f.reach ? '#ff8a4c' : (dark ? '#e8eef7' : '#243447');
+          ctx.fillText(it.txt, L.x, L.y);
+        });
+        ctx.globalAlpha = 1;
+
+        // 棋子：旗杆 + 旗帜（与平面同形状、同颜色）
+        pawnDraws.forEach(function (pd) {
+          ctx.globalAlpha = Math.min(1, 0.5 + 0.5 * pd.d);
+          ctx.strokeStyle = colorHex(pd.p.color); ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(pd.px, pd.py); ctx.lineTo(pd.px, pd.top); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(pd.px, pd.top); ctx.lineTo(pd.px + 13, pd.top + 4); ctx.lineTo(pd.px, pd.top + 8);
+          ctx.closePath();
+          ctx.fillStyle = colorHex(pd.p.color); ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+          if (pd.isMine) {
+            ctx.textAlign = 'left';
+            ctx.lineWidth = 2.5; ctx.strokeStyle = halo;
+            ctx.strokeText('我', pd.px + 16, pd.top + 7);
+            ctx.fillStyle = dark ? '#e8eef7' : '#243447';
+            ctx.fillText('我', pd.px + 16, pd.top + 7);
+          }
+        });
+        // 同城对手名字合并成一行，放在城市点下方（与平面一致）
+        pawnGroups.forEach(function (g) {
+          if (!g.others) return;
+          ctx.globalAlpha = Math.min(1, 0.5 + 0.5 * g.d);
+          ctx.textAlign = 'center';
+          ctx.font = '600 9px system-ui, -apple-system, sans-serif';
+          ctx.lineWidth = 2.5; ctx.strokeStyle = halo;
+          ctx.strokeText(g.others, g.x, g.y + 19);
+          ctx.fillStyle = dark ? '#93a4b8' : '#5b6b7f';
+          ctx.fillText(g.others, g.x, g.y + 19);
+          ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+        });
+        ctx.globalAlpha = 1;
+        ctx.textAlign = 'left';
       }
 
       function globeLoop() {
@@ -898,8 +1466,14 @@
           if (GLOBE.moved > 6) return;          // 拖动过就不当作点击
           const city = globeHitTest(e.clientX, e.clientY);
           if (!city || !state) return;
-          const can = (state.moves || []).some(function (m) { return m.to === city; });
-          if (can) socket.emit('move', { room_id: state.room_id, player_id: myPid, neighbor: city });
+          const info = (state.moves || []).find(function (m) { return m.to === city; });
+          const canGo = !!(state.current_pid === myPid && state.phase === 'move' && info);
+          if (canGo && !CITY_INFO[city]) {
+            socket.emit('move', { room_id: state.room_id, player_id: myPid,
+                                  neighbor: city, color: info.color });
+            return;
+          }
+          openCityCard(city);
         });
       }
       function applyView() {
@@ -908,26 +1482,359 @@
         if (cv) cv.classList.toggle('hidden', !isGlobe);
         if (bd) bd.classList.toggle('hidden', isGlobe);
         if (vb) vb.textContent = isGlobe ? '🌍 球面' : '🗺 平面';
+        const g3 = $('globe3d'), gs = $('globeStyleSel');
+        if (g3) g3.classList.toggle('hidden', !isGlobe);
+        // 风格选择器只在球面视图、且 WebGL 真的可用时出现
+        if (gs) {
+          gs.classList.toggle('hidden', !isGlobe || !ensureGlobe3D());
+          gs.value = globeStyle;
+        }
+        const zc = $('mapZoom');                       // 缩放控件只服务于平面地图
+        if (zc) zc.classList.toggle('hidden', isGlobe);
         try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) {}
-        if (isGlobe) { buildGlobeDots(); GLOBE.dirty = true; startGlobeLoop(); }
+        if (isGlobe) { syncGlobeStart(); buildGlobeDots(); GLOBE.dirty = true; startGlobeLoop(); }
         else if (state) { render(); }
       }
 
-      function renderBoard() {
-        const board = $('board');
-        const W = 1000, H = 720;
+      // ---------- 城市知识卡：地理 / 历史 / 风土 + 知识问答 ----------
+      function yearText(y) {
+        if (typeof y !== 'number') return '';
+        return y < 0 ? '公元前 ' + Math.abs(y) + ' 年' : y + ' 年';
+      }
+      // 城市卡上显示"国家/城市名"（如 法国/巴黎）；没有国家数据或同名时只显示城市
+      function cityLabel(name) {
+        if (!name) return '';
+        const info = CITY_INFO[name];
+        const country = info && info.country;
+        return (country && country !== name) ? country + '/' + name : name;
+      }
+
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+      }
+      function cityPoints(name) {
+        const c = (MAP.cities || []).find(function (x) { return x.name === name; });
+        return c ? c.points : 0;
+      }
+      function openCityCard(name) {
+        if (!CITY_INFO[name]) { toast('这座城市还没有知识卡'); return; }
+        const info = CITY_INFO[name];
+        const m = me();
+        const reach = ((state && state.moves) || []).find(function (x) { return x.to === name; });
+        const canGo = !!(m && state.current_pid === myPid && state.phase === 'move' && reach);
+        const q = (m && m.quiz && m.quiz.city === name) ? m.quiz : null;
+        let html = '<h2>' + (info.flag || '📍') + ' ' + esc(name) + '</h2>';
+        html += '<div class="csub">' + esc(info.country || '') + ' · ' + esc(info.zone || '') +
+          (typeof info.year === 'number' ? ' · 关键年份 ' + yearText(info.year) : '') +
+          ' · 城市卡 ' + cityPoints(name) + ' 分</div>';
+        if (info.geo) html += '<div class="csec"><div class="lab">📍 地理</div><p>' + esc(info.geo) + '</p></div>';
+        if (info.hist) html += '<div class="csec"><div class="lab">🏛 历史（' + yearText(info.year) +
+          '）</div><p>' + esc(info.hist) + '</p></div>';
+        html += '<div class="csec"><div class="lab">🍜 风土人情</div><div class="cfacts">' +
+          (info.sight ? '<div>🏛 地标：' + esc(info.sight) + '</div>' : '') +
+          (info.food ? '<div>🍽 美食：' + esc(info.food) + '</div>' : '') +
+          (info.hello ? '<div>💬 问候语：' + esc(info.hello) + '</div>' : '') +
+          '</div></div>';
+        if (q) {
+          html += '<div class="quiz"><div class="qtitle">❓ ' + esc(info.cat || '知识') +
+            '小问题：' + esc(q.q) + '</div>';
+          (q.o || []).forEach(function (op, i) {
+            html += '<button class="opt" data-idx="' + i + '">' + esc(op) + '</button>';
+          });
+          html += '<div class="why" id="quizWhy"></div></div>';
+        }
+        html += '<div class="cbtns">' +
+          (canGo ? '<button class="btn primary" id="goBtn">✈ 前往（' + reach.cost + ' 张' +
+            colorName(reach.color) + '票）</button>' : '') +
+          '<button class="btn ghost" id="closeCardBtn">' + (canGo ? '再看看' : '关闭') + '</button></div>';
+        const card = $('cityCard');
+        card.innerHTML = html;
+        card.dataset.answered = '';
+        card.dataset.pick = '';
+        $('cityModal').classList.remove('hidden');
+        $('closeCardBtn').onclick = function () { $('cityModal').classList.add('hidden'); };
+        const gb = $('goBtn');
+        if (gb) gb.onclick = function () {
+          socket.emit('move', { room_id: myRoom, player_id: myPid, neighbor: name, color: reach.color });
+          $('cityModal').classList.add('hidden');
+        };
+        card.querySelectorAll('.opt').forEach(function (b) {
+          b.onclick = function () {
+            if (card.dataset.answered === '1') return;
+            card.dataset.answered = '1';
+            card.dataset.pick = b.getAttribute('data-idx');
+            socket.emit('answer_quiz', {
+              room_id: myRoom, player_id: myPid,
+              choice: parseInt(b.getAttribute('data-idx'), 10)
+            });
+          };
+        });
+      }
+
+      // ---------- 护照：印章 / 大洲奖章 / 历史时间轴 ----------
+      function renderPassport() {
+        const panel = $('passportPanel');
+        const m = me();
+        // 只有带知识库的棋盘（如《世界之旅》）才显示护照
+        if (!m || !Object.keys(CITY_INFO).length) { panel.classList.add('hidden'); return; }
+        panel.classList.remove('hidden');
+        const stamps = m.passport || {};
+        const keys = Object.keys(stamps);
+        const byZone = {};
+        keys.forEach(function (c) {
+          const z = (stamps[c] || {}).zone || '其他';
+          (byZone[z] = byZone[z] || []).push(c);
+        });
+        const need = state.medal_cities || 3;
+        let html = '';
+        Object.keys(byZone).forEach(function (z) {
+          const list = byZone[z];
+          const has = (m.medals || []).indexOf(z) >= 0;
+          html += '<div class="zone-line">' + esc(z) + '：' + list.length + ' 座' +
+            (has ? ' 🏅已获' : '（集齐 ' + need + ' 座得奖章）') + '</div>';
+          html += '<div class="stampgrid">' + list.map(function (c) {
+            return '<span class="stamp" data-city="' + esc(c) + '">' +
+              ((stamps[c] || {}).flag || '') + ' ' + esc(c) + '</span>';
+          }).join('') + '</div>';
+        });
+        if (!keys.length) html = '<p class="tip">还没有印章——出发去世界各地盖章吧！</p>';
+        $('passportBox').innerHTML = html;
+        $('passportBox').querySelectorAll('.stamp').forEach(function (el) {
+          el.onclick = function () { openCityCard(el.getAttribute('data-city')); };
+        });
+        $('medalBox').innerHTML = (m.medals || []).length
+          ? '<div>' + m.medals.map(function (z) {
+              return '<span class="medal">🏅 ' + esc(z) + '奖章 +' + (state.medal_score || 2) + '分</span>';
+            }).join('') + '</div>'
+          : '';
+        const tl = keys.slice().sort(function (a, b) {
+          const ya = (stamps[a] || {}).year, yb = (stamps[b] || {}).year;
+          return (typeof ya === 'number' ? ya : 0) - (typeof yb === 'number' ? yb : 0);
+        });
+        $('timelineBox').innerHTML = tl.length
+          ? tl.map(function (c) {
+              return '<div class="row"><span class="yr">' + yearText((stamps[c] || {}).year) +
+                '</span><span>' + ((stamps[c] || {}).flag || '') + ' ' + esc(c) + '</span></div>';
+            }).join('')
+          : '<p class="tip">去过的城市会按历史年份排成一条时间轴。</p>';
+        const okN = m.quiz_ok || 0, noN = m.quiz_no || 0;
+        $('quizStat').innerHTML = (okN + noN)
+          ? '答对 ' + okN + ' 题 / 共答 ' + (okN + noN) + ' 题（答错也给讲解，不扣分）'
+          : '';
+      }
+
+      // ---------- 平面地图：缩放 / 平移 / 回到我的位置 ----------
+      function zoomLevel() { return VW / view.w; }
+
+      function clampView(v) {
+        // 最小 = 整张地图；最大 = 放大 8 倍；且不允许把视野推到地图之外
+        v.w = Math.max(VW / 8, Math.min(VW, v.w));
+        v.h = v.w * VH / VW;
+        v.x = Math.max(0, Math.min(VW - v.w, v.x));
+        v.y = Math.max(0, Math.min(VH - v.h, v.y));
+      }
+
+      function zoomAt(z, cx, cy) {
+        /** 缩放到 z 倍；(cx, cy) 为焦点（SVG 坐标），不传则保持视野中心不动。 */
+        z = Math.max(1, Math.min(8, z));
+        const nw = VW / z, nh = VH / z;
+        const px = (cx == null ? view.x + view.w / 2 : cx);
+        const py = (cy == null ? view.y + view.h / 2 : cy);
+        const rx = (px - view.x) / view.w, ry = (py - view.y) / view.h;
+        view.w = nw; view.h = nh;
+        view.x = px - rx * nw; view.y = py - ry * nh;
+        clampView(view);
+        updateZoomTag();
+      }
+
+      function updateZoomTag() {
+        const t = $('zoomTag');
+        if (t) t.textContent = zoomLevel().toFixed(1) + '×';
+      }
+
+      function focusMyCity() {
+        /** "*" 键：把镜头对准我（或出发点）所在的城市。 */
+        const m = me();
+        const city = (m && m.position) || (MAP && MAP.start);
+        const p = POS[city];
+        const z = Math.max(2, zoomLevel());   // 至少放大到 2 倍，才看得出"回到这里"
+        zoomAt(z);
+        if (p) { view.x = p.x - view.w / 2; view.y = p.y - view.h / 2; clampView(view); }
+        updateZoomTag();
+        if (state) renderBoard();
+        if (city) toast('回到 ' + city);
+      }
+
+      function initBoardZoom() {
+        const bd = $('board');
+        let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+        // 拖动平移（与"点城市移动"共存：位移小于 6px 才算点击）
+        bd.addEventListener('pointerdown', function (e) {
+          if (viewMode !== 'flat') return;
+          dragging = true; moved = false; panned = false;
+          sx = e.clientX; sy = e.clientY; ox = view.x; oy = view.y;
+          try { bd.setPointerCapture(e.pointerId); } catch (err) {}
+        });
+        bd.addEventListener('pointermove', function (e) {
+          if (!dragging) return;
+          const dx = e.clientX - sx, dy = e.clientY - sy;
+          if (!moved && Math.abs(dx) + Math.abs(dy) < 6) return;
+          moved = true; panned = true;
+          const k = view.w / (bd.clientWidth || 1);
+          view.x = ox - dx * k; view.y = oy - dy * k;
+          clampView(view);
+          renderBoard();
+        });
+        const stop = function () { dragging = false; };
+        bd.addEventListener('pointerup', stop);
+        bd.addEventListener('pointercancel', stop);
+        // 滚轮缩放：以鼠标位置为焦点
+        bd.addEventListener('wheel', function (e) {
+          if (viewMode !== 'flat') return;
+          e.preventDefault();
+          const rect = bd.getBoundingClientRect();
+          const k = view.w / (rect.width || 1);
+          const cx = view.x + (e.clientX - rect.left) * k;
+          const cy = view.y + (e.clientY - rect.top) * k;
+          zoomAt(zoomLevel() * (e.deltaY < 0 ? 1.25 : 0.8), cx, cy);
+          renderBoard();
+        }, { passive: false });
+
+        $('zoomInBtn').addEventListener('click', function () { zoomAt(zoomLevel() * 1.5); renderBoard(); });
+        $('zoomOutBtn').addEventListener('click', function () { zoomAt(zoomLevel() / 1.5); renderBoard(); });
+        $('zoomMeBtn').addEventListener('click', focusMyCity);
+      }
+
+      // ================= 平面 / 球面共用的城市呈现规则 =================
+      // 两个视图必须显示同一套城市状态（可达 / 公共卡 / 秘密目的地 / 出发城市 / 棋子）
+      // 和同一套标签排布结果，避免"平面看到、球面看不到"的不一致。
+
+      // 标签候选位：相对城市点的偏移（单位=屏幕像素，平面视图再乘以 1/zoom）
+      const CITY_LABEL_CAND = [
+        { dx: 0, dy: -12, anchor: 'middle' }, { dx: 0, dy: 20, anchor: 'middle' },
+        { dx: 14, dy: 4, anchor: 'start' }, { dx: -14, dy: 4, anchor: 'end' },
+        { dx: 0, dy: -26, anchor: 'middle' }, { dx: 0, dy: 34, anchor: 'middle' },
+        { dx: 16, dy: -12, anchor: 'start' }, { dx: -16, dy: -12, anchor: 'end' },
+      ];
+      // 个别城市手工指定位置（特殊地形处压线，两个视图共用）
+      const CITY_LABEL_OVERRIDES = {
+        '敦煌': { dx: -13, dy: 4, anchor: 'end' },
+        '洛阳': { dx: -13, dy: 4, anchor: 'end' },
+        '苏州': { dx: 0, dy: 20, anchor: 'middle' },
+        '遵义': { dx: 14, dy: 4, anchor: 'start' },
+        '大理': { dx: -13, dy: 4, anchor: 'end' },
+        '呼伦贝尔': { dx: -13, dy: 4, anchor: 'end' },
+      };
+
+      // 当前房间的出发城市（支持房主指定 / 随机，开局后 state 里是实际城市）
+      function currentStartCity() {
+        if (state && state.start_city && state.start_city !== 'random' && POS[state.start_city]) {
+          return state.start_city;
+        }
+        return (MAP && MAP.start) || null;
+      }
+
+      // 本帧的城市状态快照：平面与球面都从这里取，保证一致
+      function cityView() {
         const my = me();
         const myPos = my ? my.position : null;
-        // 官方规则：可沿同色线路连续走多段，可达范围由服务器计算
-        const reachSet = new Set();
-        const reachInfo = {};
+        const byCity = {};
+        ((state && state.players) || []).forEach(function (p) {
+          (byCity[p.position] = byCity[p.position] || []).push(p);
+        });
+        const reachSet = new Set(), reachInfo = {};
         if (my && state.phase === 'move' && state.moves) {
-          state.moves.forEach(function (m) {
+          state.moves.forEach(function (m) {          // 官方规则：可沿同色线路连续走多段
             reachSet.add(m.to);
             const prev = reachInfo[m.to];
             if (!prev || m.cost < prev.cost) reachInfo[m.to] = m;
           });
         }
+        const shared = ((state && state.shared_cards) || []).map(function (c) { return c.city; }).filter(Boolean);
+        const start = currentStartCity();
+        const secret = my ? my.secret : null;
+        // "只看城市卡"时要保留的城市：桌面公共卡 + 我的秘密目的地 + 棋子所在城市
+        const cards = new Set();
+        shared.forEach(function (c) { cards.add(c); });
+        if (secret) cards.add(secret);
+        Object.keys(byCity).forEach(function (c) { if (c) cards.add(c); });
+        // 开启"只看城市卡"时，这两个视图用同一个判据过滤城市
+        const shown = function (n) { return !cardOnly || cards.has(n); };
+        return {
+          my: my, myPos: myPos, byCity: byCity, reachSet: reachSet, reachInfo: reachInfo,
+          shared: shared, start: start, secret: secret, cards: cards, shown: shown,
+          // 0=我所在 1=本回合可达 2=有棋子 3=公共卡/秘密目的地 4=出发城市 5=其他
+          prio: function (n) {
+            if (n === myPos) return 0;
+            if (reachSet.has(n)) return 1;
+            if (byCity[n] && byCity[n].length) return 2;
+            if (shared.indexOf(n) >= 0 || n === secret) return 3;
+            if (n === start) return 4;
+            return 5;
+          },
+          flags: function (n) {
+            return {
+              mine: n === myPos,
+              reach: reachSet.has(n),
+              cost: reachInfo[n] ? reachInfo[n].cost : null,
+              shared: shared.indexOf(n) >= 0,
+              secret: n === secret,
+              start: n === start,
+              pawns: byCity[n] || []
+            };
+          }
+        };
+      }
+
+      // 标签避让：按优先级抢占候选位，避开已放的标签与障碍物（圆点、棋子旗）
+      // items: [{name, x, y, w, h, prio}]，坐标/尺寸均为调用方坐标系；scale 用于缩放候选位偏移
+      function layoutLabels(items, scale, obstacles) {
+        const s = scale || 1, out = {}, placed = [];
+        const hitRect = function (a, b) {
+          return !(a.x2 < b.x1 || a.x1 > b.x2 || a.y2 < b.y1 || a.y1 > b.y2);
+        };
+        const base = CITY_LABEL_CAND.map(function (c) {
+          return { dx: c.dx * s, dy: c.dy * s, anchor: c.anchor };
+        });
+        items.slice().sort(function (a, b) { return a.prio - b.prio || a.y - b.y; })
+          .forEach(function (it) {
+            const ov = CITY_LABEL_OVERRIDES[it.name];
+            const list = ov ? [{ dx: ov.dx * s, dy: ov.dy * s, anchor: ov.anchor }].concat(base) : base;
+            let best = null, bestScore = Infinity;
+            for (let i = 0; i < list.length; i++) {
+              const o = list[i];
+              const lx = it.x + o.dx, ly = it.y + o.dy;
+              const x1 = o.anchor === 'middle' ? lx - it.w / 2 : (o.anchor === 'end' ? lx - it.w : lx);
+              const rect = { x1: x1 - 2 * s, y1: ly - it.h, x2: x1 + it.w + 2 * s, y2: ly + 3 * s };
+              let score = i;                       // 越靠前的候选位越好
+              placed.forEach(function (q) { if (hitRect(rect, q)) score += 100; });
+              (obstacles || []).forEach(function (q) { if (hitRect(rect, q)) score += 30; });
+              if (score < bestScore) {
+                bestScore = score;
+                best = { x: lx, y: ly, anchor: o.anchor, rect: rect };
+              }
+              if (score === i) break;              // 已是无冲突位置，提前收工
+            }
+            if (!best) {
+              best = { x: it.x, y: it.y - 12 * s, anchor: 'middle',
+                       rect: { x1: it.x - it.w / 2, y1: it.y - it.h - 12 * s,
+                               x2: it.x + it.w / 2, y2: it.y + 3 * s - 12 * s } };
+            }
+            placed.push(best.rect);
+            out[it.name] = best;
+          });
+        return out;
+      }
+
+      function renderBoard() {
+        const board = $('board');
+        const W = 1000, H = 720;
+        const V = cityView();                      // 与球面视图同一份城市状态
+        const my = V.my;
+        const myPos = V.myPos;
+        const reachSet = V.reachSet, reachInfo = V.reachInfo;
 
         let routesSvg = '';
         MAP.routes.forEach(function (r) {
@@ -939,27 +1846,37 @@
             '" x2="' + cb.x + '" y2="' + cb.y + '" stroke="' + colorHex(color) + '" />';
         });
 
-        const sharedCities = (state.shared_cards || []).map(function (c) { return c.city; }).filter(Boolean);
-        const mySecret = my ? my.secret : null;
-        let citiesSvg = '';
-        Object.keys(POS).forEach(function (name) {
-          const c = POS[name];
-          let cls = 'city';
-          if (reachSet.has(name)) cls += ' reach';
-          if (sharedCities.indexOf(name) >= 0) cls += ' shared';
-          if (name === mySecret) cls += ' secret';
-          const r = name === '北京' ? 9 : 7;
-          citiesSvg += '<g class="' + cls + '" data-city="' + name + '">' +
-            '<circle class="city-circle" cx="' + c.x + '" cy="' + c.y + '" r="' + r + '" fill="#fff" stroke="#888" stroke-width="2"/>' +
-            '<text class="city-label" x="' + c.lx + '" y="' + c.ly + '" text-anchor="' + c.anchor + '">' +
-            name + (reachInfo[name] ? '<tspan class="cost">' + reachInfo[name].cost + '票</tspan>' : '') + '</text>' +
-            '</g>';
+        const sharedCities = V.shared;
+        const mySecret = V.secret;
+        const startCity = V.start;
+        const byCity = V.byCity;                        // 棋子先摆好（标签避让时要避开旗帜）
+
+        // ---- 屏幕恒定尺寸：放大 N 倍时，圆点/文字/棋子在屏幕上保持原大小 ----
+        const s = 1 / zoomLevel();
+
+        // ---- 只排视野内的城市，重要城市优先 ----
+        const pad = 60 * s + 30;
+        const visible = Object.keys(POS).filter(function (n) {
+          if (!V.shown(n)) return false;               // 只看城市卡时，其余城市整座隐藏
+          const p = POS[n];
+          return p.x > view.x - pad && p.x < view.x + view.w + pad &&
+                 p.y > view.y - pad && p.y < view.y + view.h + pad;
+        });
+        // 分级显示（LOD）：低倍率只标重要城市，放大后才全部亮出名字
+        const lodAll = zoomLevel() >= 1.6;
+        const showLabel = {};
+        visible.forEach(function (n) { if (lodAll || V.prio(n) < 5) showLabel[n] = true; });
+
+        // 障碍物：不显示标签的城市圆点 + 所有棋子旗帜
+        const obstacles = [];
+        visible.forEach(function (n) {
+          if (showLabel[n]) return;
+          const p = POS[n];
+          obstacles.push({ x1: p.x - 10 * s, y1: p.y - 10 * s, x2: p.x + 10 * s, y2: p.y + 10 * s });
         });
 
-        const byCity = {};
-        state.players.forEach(function (p) {
-          (byCity[p.position] = byCity[p.position] || []).push(p);
-        });
+        // ---- 棋子几何与绘制（尺寸随 s 缩放）----
+        const pawnBoxes = [];
         let pawnsSvg = '';
         Object.keys(byCity).forEach(function (city) {
           // 自己的棋子画在最上层
@@ -969,22 +1886,25 @@
             return 0;
           });
           const base = POS[city];
+          if (!base) return;
           const n = list.length;
           const spread = n > 1;
           list.forEach(function (p, i) {
-            const px = spread ? base.x + (i - (n - 1) / 2) * 14 : base.x;
-            const py = spread ? base.y - 15 : base.y;
+            const px = spread ? base.x + (i - (n - 1) / 2) * 14 * s : base.x;
+            const py = spread ? base.y - 15 * s : base.y;
             const isMine = my && p.pid === my.pid;
             // 旗杆 + 旗帜（所有玩家统一，无底部圆球）
-            const top = py - 20;
-            pawnsSvg += '<line class="pawn-pole" x1="' + px + '" y1="' + py + '" x2="' + px + '" y2="' + top + '" stroke="' +
-              colorHex(p.color) + '" stroke-width="2"/>';
+            const top = py - 20 * s;
+            pawnsSvg += '<line class="pawn-pole" x1="' + px + '" y1="' + py + '" x2="' + px + '" y2="' + top +
+              '" stroke="' + colorHex(p.color) + '" stroke-width="' + (2 * s).toFixed(2) + '"/>';
             pawnsSvg += '<path class="pawn-flag" d="M' + px + ' ' + top +
-              ' L' + (px + 13) + ' ' + (top + 4) + ' L' + px + ' ' + (top + 8) + ' Z" fill="' +
-              colorHex(p.color) + '" stroke="#fff" stroke-width="1.5"/>';
+              ' L' + (px + 13 * s) + ' ' + (top + 4 * s) + ' L' + px + ' ' + (top + 8 * s) + ' Z" fill="' +
+              colorHex(p.color) + '" stroke="#fff" stroke-width="' + (1.5 * s).toFixed(2) + '"/>';
             if (isMine) {
-              pawnsSvg += '<text class="pawn-tag" x="' + (px + 16) + '" y="' + (top + 7) + '" text-anchor="start">我</text>';
+              pawnsSvg += '<text class="pawn-tag" style="font-size:' + (11 * s).toFixed(1) + 'px" x="' +
+                (px + 16 * s) + '" y="' + (top + 7 * s) + '" text-anchor="start">我</text>';
             }
+            pawnBoxes.push({ x1: px - 4 * s, y1: top - 12 * s, x2: px + (isMine ? 30 : 17) * s, y2: top + 10 * s });
           });
           // 同城所有对手的名字合并成一行，放在城市点下方
           const others = my ? list.filter(function (p) { return p.pid !== my.pid; }) : [];
@@ -992,8 +1912,45 @@
             const names = others.map(function (p) {
               return (p.name || '？') + (p.connected ? '' : '(离线)');
             }).join('、');
-            pawnsSvg += '<text class="pawn-other-tag" x="' + base.x + '" y="' + (base.y + 19) + '" text-anchor="middle">' + names + '</text>';
+            pawnsSvg += '<text class="pawn-other-tag" style="font-size:' + (9 * s).toFixed(1) + 'px" x="' + base.x +
+              '" y="' + (base.y + 19 * s) + '" text-anchor="middle">' + esc(names) + '</text>';
+            pawnBoxes.push({ x1: base.x - names.length * 5 * s, y1: base.y + 10 * s, x2: base.x + names.length * 5 * s, y2: base.y + 22 * s });
           }
+        });
+        pawnBoxes.forEach(function (b) { obstacles.push(b); });
+
+        // ---- 标签位置：与球面视图共用 layoutLabels（同样的优先级、候选位与避让规则）----
+        const labelItems = visible.filter(function (n) { return showLabel[n]; }).map(function (n) {
+          return {
+            name: n, x: POS[n].x, y: POS[n].y, prio: V.prio(n),
+            w: n.length * 12 * s + (reachInfo[n] ? 26 * s : 0), h: 14 * s
+          };
+        });
+        const labelPos = layoutLabels(labelItems, s, obstacles);
+
+        let citiesSvg = '';
+        visible.forEach(function (name) {
+          const c = POS[name];
+          let cls = 'city';
+          if (reachSet.has(name)) cls += ' reach';
+          if (sharedCities.indexOf(name) >= 0) cls += ' shared';
+          if (name === mySecret) cls += ' secret';
+          if (name === startCity) cls += ' start';
+          // 出发城市画大一点（当前房间的出发城市，可能是房主指定 / 随机结果）
+          const r = (name === startCity ? 9 : 7) * s;
+          const info = CITY_INFO[name];
+          const tip = (info && info.flag ? info.flag + ' ' : '') + name;
+          citiesSvg += '<g class="' + cls + '" data-city="' + name + '">' +
+            '<title>' + esc(tip) + '</title>' +
+            '<circle class="city-circle" cx="' + c.x + '" cy="' + c.y + '" r="' + r.toFixed(2) + '" fill="#fff"/>';
+          if (showLabel[name]) {
+            const L = labelPos[name];
+            citiesSvg += '<text class="city-label" style="font-size:' + (11.5 * s).toFixed(1) + 'px" x="' + L.x +
+              '" y="' + L.y + '" text-anchor="' + L.anchor + '">' + esc(name) +
+              (reachInfo[name] ? '<tspan class="cost" style="font-size:' + (9 * s).toFixed(1) + 'px">' +
+                reachInfo[name].cost + '票</tspan>' : '') + '</text>';
+          }
+          citiesSvg += '</g>';
         });
 
         // 本回合已走过的路线（橙色虚线）
@@ -1007,17 +1964,26 @@
         const landSvg = LAND_PATHS.map(function (d) {
           return '<path class="land" d="' + d + '" />';
         }).join('');
-        board.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">' +
+        board.innerHTML = '<svg viewBox="' + view.x + ' ' + view.y + ' ' + view.w + ' ' + view.h +
+          '" preserveAspectRatio="xMidYMid meet" style="--zs:' + zoomLevel().toFixed(3) + '">' +
           landSvg + routesSvg + pathSvg + citiesSvg + pawnsSvg + '</svg>';
 
-        board.querySelectorAll('.city.reach').forEach(function (g) {
+        board.querySelectorAll('.city').forEach(function (g) {
           g.addEventListener('click', function () {
+            if (panned) return;                        // 刚刚是在拖动地图，不算点城市
             const target = g.getAttribute('data-city');
             const info = reachInfo[target];
-            socket.emit('move', {
-              room_id: myRoom, player_id: myPid,
-              neighbor: target, color: info ? info.color : undefined
-            });
+            const canGo = !!(my && state.current_pid === myPid && state.phase === 'move' && info);
+            // 有知识库的棋盘（世界之旅）：点城市先看知识卡，卡里有"前往"按钮
+            // 没有知识库的棋盘（山河之旅）：保持正版"点一下就走"的手感
+            if (canGo && !CITY_INFO[target]) {
+              socket.emit('move', {
+                room_id: myRoom, player_id: myPid,
+                neighbor: target, color: info.color
+              });
+              return;
+            }
+            openCityCard(target);
           });
         });
       }
@@ -1031,42 +1997,45 @@
           const off = p.connected ? '' : '<span class="offline">离线</span>';
           const cardsTxt = (p.cards && p.cards.length) ? p.cards.join('、') : '暂无';
           const cardsLine = '<span class="pcards">🃏 已收城市卡：' + cardsTxt + '</span>';
+          const medalTxt = (p.medals && p.medals.length) ? ' 🏅' + p.medals.length : '';
           if (p.bot) {
             return '<div class="player bot' + cur + '">' + dot +
               '<span class="pname">' + p.name + '</span>' +
               '<span class="goal">机器人</span>' +
-              '<span class="pscore">' + p.score + '分</span>' +
+              '<span class="pscore">' + p.score + '分' + medalTxt + '</span>' +
               cardsLine + '</div>';
           }
           const goal = p.goal_done ? ' ✅目的地已完成' : '';
           // 第 4 张牌是秘密目的地：自己的可见，别人的看不到
           const card4 = m && p.pid === m.pid
-            ? '<span class="pcard">🎴 ' + (p.secret || '—') + '</span>'
+            ? '<span class="pcard">🎴 ' + esc(cityLabel(p.secret)) + '</span>'
             : '<span class="pcard">🎴 ？？？</span>';
           return '<div class="player' + cur + '">' + dot +
             '<span class="pname">' + p.name + off + '</span>' +
             '<span class="goal">目标' + goal + '</span>' +
             card4 +
-            '<span class="pscore">' + p.score + '分</span>' +
+            '<span class="pscore">' + p.score + '分' + medalTxt + '</span>' +
             cardsLine + '</div>';
         }).join('');
 
         // 每人 4 张牌：前 3 张公共（所有人可见），第 4 张为秘密目的地（仅本人可见）
         const sc = $('sharedCards');
         const pub = state.shared_cards || [];
-        const no = ['①', '②', '③', '④'];
+        const no = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
+        const ct = $('cardsTitle');
+        if (ct) ct.textContent = '城市卡（桌面 ' + pub.length + ' 张 + 秘密目的地）';
         let cardsHtml = '';
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < pub.length; i++) {
           const c = pub[i];
           cardsHtml += c && c.city
             ? '<div class="cardchip"><div class="cno">' + no[i] + '</div>' +
-              '<div class="ccity">' + c.city + '</div><div class="cpts">' + c.points + '分</div></div>'
+              '<div class="ccity">' + esc(cityLabel(c.city)) + '</div><div class="cpts">' + c.points + '分</div></div>'
             : '<div class="cardchip empty"><div class="cno">' + no[i] + '</div><div class="ccity">空</div></div>';
         }
         cardsHtml += (m && m.secret)
-          ? '<div class="cardchip secret"><div class="cno">' + no[3] + '</div>' +
-            '<div class="ccity">' + m.secret + '</div><div class="cpts">仅你可见</div></div>'
-          : '<div class="cardchip secret"><div class="cno">' + no[3] + '</div>' +
+          ? '<div class="cardchip secret"><div class="cno">' + no[pub.length] + '</div>' +
+            '<div class="ccity">' + esc(cityLabel(m.secret)) + '</div><div class="cpts">仅你可见</div></div>'
+          : '<div class="cardchip secret"><div class="cno">' + no[pub.length] + '</div>' +
             '<div class="ccity">🎴 秘密目的地</div></div>';
         sc.innerHTML = cardsHtml;
 
@@ -1084,8 +2053,54 @@
         }
 
         const lb = $('logBox');
-        lb.innerHTML = (state.log || []).map(function (l) { return '<div>' + l + '</div>'; }).join('');
+        lb.innerHTML = (state.log || []).map(function (l) { return '<div>' + esc(l) + '</div>'; }).join('');
         lb.scrollTop = lb.scrollHeight;
+        renderPassport();
+        renderChat();
+      }
+
+      // 房间聊天：来自服务端的 messages（所有人可见，自己发的那行右侧高亮）
+      function renderChat() {
+        const cb = $('chatBox');
+        if (!cb) return;
+        const list = state.messages || [];
+        // 用户正在往上翻历史时不要强行拉到底部；新消息来了才自动跟随
+        const nearBottom = cb.scrollHeight - cb.scrollTop - cb.clientHeight < 40;
+        cb.innerHTML = list.length
+          ? list.map(function (c) {
+              const mine = myPid && c.pid === myPid;
+              return '<div class="msg' + (mine ? ' mine' : '') + '">' +
+                '<span class="dot" style="background:' + colorHex(c.color) + '"></span>' +
+                '<span class="who">' + esc(c.name || '玩家') + '：</span>' +
+                '<span class="txt">' + esc(c.text) + '</span></div>';
+            }).join('')
+          : '<div class="chat-empty">还没有人说话，打个招呼吧 👋</div>';
+        if (nearBottom || cb.dataset.followed !== '1') {
+          cb.scrollTop = cb.scrollHeight;
+          cb.dataset.followed = '1';
+        }
+      }
+
+      function sendChat() {
+        const inp = $('chatInput');
+        const text = (inp.value || '').trim();
+        if (!text) return;
+        if (!joined || !myRoom || !myPid) { toast('先加入房间才能聊天'); return; }
+        inp.value = '';
+        // 等 ack：确认送达（服务端已广播）才放心；没确认就把原文还给输入框，
+        // 避免「发了却无声无息」（常见于服务器进程是加聊天功能前启动的旧进程）
+        let acked = false;
+        const timer = setTimeout(function () {
+          if (acked) return;
+          acked = true;
+          inp.value = text; inp.focus();
+          toast('消息未送达：请刷新页面；若刷新无效请重启服务器（python server.py）');
+        }, 2500);
+        socket.emit('chat', { room_id: myRoom, player_id: myPid, text: text }, function (ok) {
+          if (acked) return;
+          acked = true; clearTimeout(timer);
+          if (!ok) { inp.value = text; inp.focus(); toast('发送失败，请重试'); }
+        });
       }
 
       function renderControls() {
@@ -1117,6 +2132,8 @@
         const bots = state.players.filter(function (p) { return p.bot; }).length;
         $('addBotBtn').classList.toggle('hidden', !(inLobby && isHost && state.players.length < 4));
         $('removeBotBtn').classList.toggle('hidden', !(inLobby && isHost && bots > 0));
+        // 出发城市：等待阶段房主可改，其他人只读；开局后仅展示
+        renderStartCityBar(isHost, inLobby);
 
         const canEnd = isMyTurn && state.phase === 'move';
         $('rollBtn').classList.toggle('hidden', !(isMyTurn && state.phase === 'roll'));
@@ -1150,12 +2167,56 @@
         }
       }
 
+      // 对局中的出发城市栏：等待阶段房主可改，开局后只读展示
+      function renderStartCityBar(isHost, inLobby) {
+        const bar = $('startCityBar');
+        if (!bar || bar.classList.contains('hidden')) return;
+        const sel = $('startCitySelect2');
+        sel.disabled = !(isHost && inLobby);
+        const cur = state.start_city === 'random' ? 'random' : (state.start_city || MAP.start);
+        if (sel.value !== cur) sel.value = cur;
+        $('startCityTag').textContent = inLobby
+          ? (isHost ? '（你是房主，可修改）' : '（由房主设置）')
+          : '已出发：' + (cur === 'random' ? '随机' : cur);
+      }
+
       function render() {
         if (!state) return;
+        const cob = $('cardOnlyBtn');
+        if (cob) { cob.classList.remove('hidden'); cob.classList.toggle('filter-on', cardOnly); }
         // 球面视图由 Canvas 渲染（自带动画循环），平面视图走 SVG
-        if (viewMode === 'globe') renderGlobe(); else renderBoard();
+        if (viewMode === 'globe') { syncGlobeStart(); renderGlobe(); } else renderBoard();
         renderSidebar();
         renderControls();
+        maybeShowEnd();
+      }
+
+      // 一局结束：弹出战报并询问"再来一局"（同一房间重开，成绩清零，仅弹一次）
+      let endShownFor = null;
+      function maybeShowEnd() {
+        const mask = $('endMask');
+        if (!mask) return;
+        if (state && state.state === 'finished') {
+          if (endShownFor === state.room_id) return;
+          endShownFor = state.room_id;
+          const rank = state.players.slice().sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+          $('endTitle').textContent = rank.length ? '🎉 ' + (rank[0].name || '玩家') + ' 获胜！' : '🎉 游戏结束';
+          $('endBoard').innerHTML = rank.map(function (p, i) {
+            return '<div class="end-row' + (i === 0 ? ' first' : '') + '">' +
+              '<span class="dot" style="background:' + colorHex(p.color) + '"></span>' +
+              '<b>' + esc(p.name || '玩家') + '</b><span>' + (p.score || 0) + ' 分</span>' +
+              '<span class="muted">秘密目的地 ' + esc(cityLabel(p.secret)) + '</span></div>';
+          }).join('');
+          const isHost = !!(myPid && state.host_pid === myPid);
+          $('rematchBtn').classList.toggle('hidden', !isHost);
+          const w = $('endWait');
+          w.classList.toggle('hidden', isHost);
+          w.textContent = '⏳ 等待房主开始新一局…';
+          mask.classList.remove('hidden');
+        } else {
+          mask.classList.add('hidden');
+          if (!state || state.state === 'playing') endShownFor = null;   // 重开后允许下局再弹
+        }
       }
 
       function startTimerTicker() {
@@ -1272,12 +2333,16 @@
           max_players: parseInt($('maxPlayersSelect').value, 10),
           bot_count: parseInt($('botCountSelect').value, 10)
         };
-        // 开放规则：仅当该棋盘声明了可选项时才带上（如世界之旅的目标分/步数）
+        // 开放规则：仅当该棋盘声明了可选项时才带上（如世界之旅的目标分/步数/出发城市）
         const ruleRow = $('ruleRow');
         if (ruleRow && !ruleRow.classList.contains('hidden')) {
           const ws = $('winScoreSelect'), st = $('stepsSelect');
           if (ws && ws.value) payload.win_score = parseInt(ws.value, 10);
           if (st && st.value) payload.steps_per_turn = parseInt(st.value, 10);
+        }
+        const startRow = $('startRow');
+        if (startRow && !startRow.classList.contains('hidden')) {
+          payload.start_city = $('startCitySelect').value;   // 'random' 表示开局随机揭晓
         }
         socket.emit('create_room', payload);
       });
@@ -1322,7 +2387,33 @@
       $('endBtn').addEventListener('click', function () {
         socket.emit('end_turn', { room_id: myRoom, player_id: myPid });
       });
+      initBoardZoom();   // 平面地图：右上角 + / - / *（缩放与回到我所在的位置）
+      // 房主在对局中改出发城市（仅等待阶段有效，服务端会校验）
+      $('startCitySelect2').addEventListener('change', function () {
+        if (!state || state.state !== 'lobby') return;
+        socket.emit('set_start_city', {
+          room_id: myRoom, player_id: myPid, start_city: $('startCitySelect2').value
+        });
+      });
+      // 侧边栏面板：点标题折叠 / 展开（次要信息收起，给聊天等留空间）
+      document.querySelector('.sidebar').addEventListener('click', function (e) {
+        const h = e.target.closest('.panel h3');
+        if (h) h.parentElement.classList.toggle('collapsed');
+      });
+      // 房间聊天：发送按钮 / 回车发送（Shift+回车换行会被裁剪掉，保持简洁）
+      $('chatSendBtn').addEventListener('click', sendChat);
+      $('chatInput').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendChat(); }
+      });
       $('leaveBtn').addEventListener('click', function () {
+        try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+        location.reload();
+      });
+      // 结束弹层：再来一局（房主）/ 退出房间
+      $('rematchBtn').addEventListener('click', function () {
+        socket.emit('start_game', { room_id: myRoom, player_id: myPid });
+      });
+      $('endLeaveBtn').addEventListener('click', function () {
         try { localStorage.removeItem(STORE_KEY); } catch (e) {}
         location.reload();
       });
@@ -1332,6 +2423,8 @@
       let themeDark = false;
       function applyTheme() {
         $('board').classList.toggle('dark', themeDark);
+        const ba = document.querySelector('.board-area');
+        if (ba) ba.classList.toggle('dark', themeDark);   // 缩放控件跟着一起变暗
         $('themeBtn').textContent = themeDark ? '🌙 暗色' : '🌞 亮色';
         try { localStorage.setItem(THEME_KEY, themeDark ? 'dark' : 'light'); } catch (e) {}
         if (viewMode === 'globe') renderGlobe();   // 球面配色随主题重绘
@@ -1339,10 +2432,38 @@
       $('themeBtn').addEventListener('click', function () { themeDark = !themeDark; applyTheme(); });
       try { themeDark = localStorage.getItem(THEME_KEY) === 'dark'; } catch (e) {}
 
+      // "只看城市卡"：地图（平面 / 球面）只显示城市卡上的城市，再点还原
+      function applyCardOnly() {
+        const b = $('cardOnlyBtn');
+        if (b) b.classList.toggle('filter-on', cardOnly);
+        try { localStorage.setItem(CARD_KEY, cardOnly ? '1' : '0'); } catch (e) {}
+      }
+      $('cardOnlyBtn').addEventListener('click', function () {
+        cardOnly = !cardOnly;
+        applyCardOnly();
+        if (cardOnly && viewMode === 'globe' && state && MAP) {
+          // 只有当卡片城市全在地球背面时才转过去，免得点了"没反应"；正面能看到就不动视角
+          const all = Array.from(cityView().cards).filter(function (c) { return MAP.geo[c]; });
+          const front = all.filter(function (c) {
+            return projectVec(MAP.geo[c][0], MAP.geo[c][1]).z > 0.03;
+          });
+          if (all.length && !front.length) { GLOBE.init = false; centerGlobeOn(all[0]); }
+        }
+        toast(cardOnly ? '👁 只看城市卡上的城市' : '👁 已还原全部城市');
+        if (state) render();
+      });
+      try { cardOnly = localStorage.getItem(CARD_KEY) === '1'; } catch (e) {}
+      applyCardOnly();
+
       // 视图切换：平面地图 ↔ 球面地球（仅支持球面的棋盘才显示该按钮）
       $('viewBtn').addEventListener('click', function () {
         viewMode = (viewMode === 'globe') ? 'flat' : 'globe';
         applyView();
+      });
+      // 球面风格：每个玩家本地切换（写实 / 夜景 / 卡通），不影响其他玩家
+      $('globeStyleSel').addEventListener('change', function () {
+        applyGlobeStyle($('globeStyleSel').value);
+        renderGlobe();
       });
       try { if (localStorage.getItem(VIEW_KEY) === 'globe') viewMode = 'globe'; } catch (e) {}
 
@@ -1390,24 +2511,48 @@
       lastRoomsJson = j;
       if (!list.length) { box.innerHTML = '<div class="room-empty">暂无可加入的房间，可以先"创建房间"</div>'; return; }
       box.innerHTML = '';
+      let dimHead = null;
       list.forEach(function (r) {
         const div = document.createElement('div');
+        // 不可加入的（进行中/已满/已结束）灰显在列表末尾：房间还在，只是不能进
+        if (!r.joinable) {
+          if (!dimHead) {
+            dimHead = document.createElement('div');
+            dimHead.className = 'room-dim-head';
+            dimHead.textContent = '—— 以下房间不可加入 ——';
+            box.appendChild(dimHead);
+          }
+          div.className = 'room-item dim';
+          const why = r.state === 'playing' ? '🎲 游戏进行中'
+            : (r.state === 'finished' ? '🏁 已结束' : '🚫 已满员');
+          const people = r.humans + ' 人类 · ' + r.bots + ' 机器人';
+          div.innerHTML = '<span class="rid">' + r.room_id + '</span>' +
+            '<span class="meta">👤 ' + (r.creator || '房主') + ' 创建 · ' + why + '<br>' +
+            '当前 ' + people + ' / 共 ' + r.max_players + ' 人</span>';
+          div.addEventListener('click', function () {
+            toast(why + '：不能加入。若这是你的房间，请在原标签页继续，或等房主"再来一局"。');
+          });
+          box.appendChild(div);
+          return;
+        }
         div.className = 'room-item';
         div.dataset.rid = r.room_id;
         div.dataset.pwd = r.has_password ? '1' : '';
         const pwd = r.has_password ? '🔒 有密码' : '🔓 无密码';
         const people = r.humans + ' 人类 · ' + r.bots + ' 机器人';
+        const start = r.start_city ? ' · 🛫 ' + (r.start_city === 'random' ? '🎲 随机出发' : r.start_city) : '';
         div.innerHTML = '<span class="rid">' + r.room_id + '</span>' +
-          '<span class="meta">👤 ' + (r.creator || '房主') + ' 创建 · ' + pwd + '<br>' +
+          '<span class="meta">👤 ' + (r.creator || '房主') + ' 创建 · ' + pwd + start + '<br>' +
           '当前 ' + people + ' / 共 ' + r.max_players + ' 人</span>';
         box.appendChild(div);
       });
       }
 
       // 事件委托：点击列表中的房间直接加入；有密码则弹出密码框
+      // 灰显（进行中/已满/已结束）的房间不可加入，由它们自己的提示处理
       $('roomList').addEventListener('click', function (ev) {
         const item = ev.target.closest('.room-item');
-        if (!item) return;
+        if (!item || item.classList.contains('dim') || !item.dataset.rid) return;
         const rid = item.dataset.rid;
         $('roomInput').value = rid;
         if (item.dataset.pwd) {

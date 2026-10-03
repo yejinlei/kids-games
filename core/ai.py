@@ -27,14 +27,27 @@ def _affordable(room, pid, to_city):
 
 
 def targets_for(room, pid):
-    """目标城市 -> 权重。"""
+    """目标城市 -> 权重。
+
+    关键：秘密目的地只有【分数达标时停留】才算获胜，所以分数不够时不能一直往
+    那儿跑（否则会在目的地附近来回乒乓，永远凑不够分）。分数越接近目标分，
+    目的地的权重才越高。
+    """
     p = room.players[pid]
     tg = {}
     for c in room.shared_cards:
         if c:
             tg[c] = 1.0 + room.M.CITY_POINTS.get(c, 1) * 0.45   # 分值越高越吸引人
-    if p['secret'] and not p['goal_done']:
-        tg[p['secret']] = tg.get(p['secret'], 0.0) + 2.2        # 目的地是获胜前提
+    secret = p.get('secret')
+    if secret and not p.get('goal_done') and secret != p['position']:
+        need = room.win_score - p['score']
+        if need <= 0:
+            add = 2.6        # 分数已达标：立刻冲目的地
+        elif need <= 2:
+            add = 1.6        # 快达标了：开始往目的地靠拢
+        else:
+            add = 0.4        # 分数还差很多：先专心收城市卡
+        tg[secret] = tg.get(secret, 0.0) + add
     return tg
 
 
@@ -44,11 +57,14 @@ def next_step(room, pid, level='normal'):
     p = room.players[pid]
     here = p['position']
     tg = targets_for(room, pid)
-    if not tg:
-        return None
     # 已经站在公共卡城市上：停下即可拿分，别走开
     if here in room.shared_cards:
         return None
+    if not tg:
+        # 桌面上没有城市卡（牌堆抽完且都没命中）：也别站着不动，随便挪一步
+        wander = [(r['cost'], r['to']) for r in room.neighbors(here)
+                  if _affordable(room, pid, r['to'])]
+        return min(wander)[1] if wander else None
 
     # 挑性价比最高的目标：权重高、距离近
     best = None
@@ -88,10 +104,7 @@ def next_step(room, pid, level='normal'):
     gain, _cost, m = options[0]
     if gain > 0:
         return m
-    # 没有能缩短距离的走法时：走一步最便宜的顺路步，保持推进（避免一直攒票不动）
-    if gain == 0:
-        return m
-    # 距离反而变远但只要 1 张票：偶尔游走探路，避免看起来一直不动
-    if _cost == 1 and random.random() < 0.4:
-        return m
-    return None
+    # 没有能缩短距离的走法（比如通往目的地的那一步买不起）：也绝不原地不动，
+    # 否则会一直攒票、整局卡死。挑最便宜的一步挪过去，绕路或游走都行。
+    options.sort(key=lambda x: (x[1], -x[0]))
+    return options[0][2]

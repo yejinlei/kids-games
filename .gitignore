@@ -21,3 +21,12 @@ __pycache__/
 
 # 临时验证脚本
 _verify_*.py
+_test_*.py
+
+# 本地验证产物（调试截图 / 页快照 / Playwright 缓存）
+layout*.png
+globe*.png
+final.png
+lobby.yaml
+room.yaml
+.playwright-cli/

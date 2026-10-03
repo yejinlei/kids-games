@@ -38,13 +38,13 @@ def register_game(app, socketio, spec):
 
     @app.route('/api/rooms/%s' % gid, endpoint='%s_api_rooms' % gid)
     def api_rooms():
-        """房间列表：等待中且未满的房间。"""
+        """房间列表：等待中且未满的可加入；进行中/已满/已结束的也返回（灰显展示），
+        让玩家永远能找到自己创建的房间，而不是疑惑「房间去哪了」。"""
         out = []
         with rooms_lock:
             for rid, room in rooms.items():
                 with room.lock:
-                    if room.state != 'lobby' or len(room.players) >= room.max_players:
-                        continue
+                    full = len(room.players) >= room.max_players
                     out.append({
                         'room_id': rid,
                         'game': gid,
@@ -56,8 +56,11 @@ def register_game(app, socketio, spec):
                         'max_players': room.max_players,
                         'dice_count': room.dice_count,
                         'timeout': room.timeout,
+                        'start_city': room.start_city,
+                        'state': room.state,
+                        'joinable': room.state == 'lobby' and not full,
                     })
-        out.sort(key=lambda r: r['room_id'])
+        out.sort(key=lambda r: (not r['joinable'], r['room_id']))
         return jsonify({'rooms': out})
 
     # -------------------- 工具 --------------------
@@ -125,6 +128,15 @@ def register_game(app, socketio, spec):
             # 未走满步数时回合仍在进行，循环继续走下一步；
             # 走满后引擎会自动结束回合，下一轮由上面的守卫 break 掉
             time.sleep(0.6)
+
+        # 机器人的知识问答：自动作答（答案与讲解会写进日志，孩子也能顺带学到）
+        with room.lock:
+            try:
+                room.auto_answer_quiz(pid)
+            except GameError:
+                pass
+            broadcast(room)
+        time.sleep(0.5)
 
         with room.lock:
             # 若一步都没走成（仍在该机器人回合），则结束回合（结算/轮空）
@@ -202,6 +214,8 @@ def register_game(app, socketio, spec):
             bot_count = max(0, min(3, int(data.get('bot_count', 0) or 0)))
         except (TypeError, ValueError):
             bot_count = 0
+        # 出发城市：房主指定，或 'random'（开局揭晓）；不传则沿用棋盘默认
+        start_city = (data.get('start_city') or '').strip()
         desired = (data.get('room_id') or '').strip()
         if desired:
             if not re.fullmatch(r'\d{4}', desired):
@@ -216,7 +230,8 @@ def register_game(app, socketio, spec):
         with rooms_lock:
             room = JourneyRoom(spec.map, rid, password, dice_count, timeout,
                                ai_level=ai_level, max_players=max_players,
-                               win_score=win_score, steps_per_turn=steps_per_turn)
+                               win_score=win_score, steps_per_turn=steps_per_turn,
+                               start_city=start_city)
             rooms[rid] = room
         pid = str(uuid.uuid4())
         with room.lock:
@@ -312,6 +327,21 @@ def register_game(app, socketio, spec):
             room.log.append(f'{removed_name} 被移出房间')
         broadcast(room)
 
+    @socketio.on('set_start_city', namespace=ns)
+    def set_start_city(data):
+        """房主在等待阶段修改出发城市（'random' 表示开局随机）。"""
+        res = require_player(data)
+        if not res:
+            return
+        room, pid, p = res
+        with room.lock:
+            try:
+                room.set_start_city(pid, (data or {}).get('start_city') or '')
+            except GameError as e:
+                emit('error', {'msg': str(e)})
+                return
+            broadcast(room)
+
     @socketio.on('start_game', namespace=ns)
     def start_game(data):
         res = require_player(data)
@@ -361,6 +391,27 @@ def register_game(app, socketio, spec):
             schedule_timer(room)
             maybe_bot_turn(room)
 
+    @socketio.on('answer_quiz', namespace=ns)
+    def answer_quiz(data):
+        """回答抵达城市时的知识题（地理 / 历史 / 文化）。"""
+        res = require_player(data)
+        if not res:
+            return
+        room, pid, p = res
+        try:
+            choice = int((data or {}).get('choice'))
+        except (TypeError, ValueError):
+            choice = -1
+        with room.lock:
+            try:
+                detail = room.answer_quiz(pid, choice)
+            except GameError as e:
+                emit('error', {'msg': str(e)})
+                return
+            broadcast(room)
+        # 把解析（正确答案 + 讲解）单独回给答题的人，方便弹窗展示
+        emit('quiz_result', detail)
+
     @socketio.on('end_turn', namespace=ns)
     def end_turn(data):
         res = require_player(data)
@@ -377,6 +428,21 @@ def register_game(app, socketio, spec):
             if room.state == 'playing':
                 schedule_timer(room)
                 maybe_bot_turn(room)
+
+    @socketio.on('chat', namespace=ns)
+    def chat(data):
+        """房间内聊天：只校验发言人在房间里，内容广播给全房间。
+        返回值作为客户端 ack：True=已广播；False/无返回=未送达（前端据此提示）。"""
+        res = require_player(data)
+        if not res:
+            return False
+        room, pid, p = res
+        with room.lock:
+            if not room.add_chat(pid, (data or {}).get('text')):
+                emit('error', {'msg': '消息内容为空'})
+                return False
+            broadcast(room)
+        return True
 
     @socketio.on('disconnect', namespace=ns)
     def disconnect():

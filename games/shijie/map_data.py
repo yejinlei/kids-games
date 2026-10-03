@@ -271,12 +271,26 @@ LAND = [
 
 
 def build_map():
-    """组装《世界之旅》棋盘。"""
+    """组装《世界之旅》棋盘（含 150 座城市的地理 / 历史 / 风土知识库）。
+
+    第一批 66 座在本文件；第二批 84 座在 expansion.py / culture_more.py，
+    合并后棋盘为 150 座城市。
+    """
+    from games.shijie.culture import CITY_INFO
+    from games.shijie.culture_more import CITY_INFO_MORE
+    from games.shijie.expansion import (EXTRA_CITY_GEO, EXTRA_CITY_POINTS,
+                                        EXTRA_ROUTES)
+    geo = dict(CITY_GEO)
+    geo.update(EXTRA_CITY_GEO)
+    points = dict(CITY_POINTS)
+    points.update(EXTRA_CITY_POINTS)
+    info = dict(CITY_INFO)
+    info.update(CITY_INFO_MORE)
     return GameMap(
         name='世界之旅',
-        city_geo=CITY_GEO,
-        city_points=CITY_POINTS,
-        routes=ROUTES,
+        city_geo=geo,
+        city_points=points,
+        routes=ROUTES + EXTRA_ROUTES,
         colors=COLORS,
         wild=WILD,
         dice_faces=DICE_FACES,
@@ -285,4 +299,11 @@ def build_map():
         dice_per_turn=DICE_PER_TURN,
         win_score=10,
         projection=world_projection,
+        city_info=info,
+        # 学习玩法：知识卡问答 + 护照印章 + 大洲奖章
+        features=['culture', 'passport', 'medal'],
+        medal_cities=3,
+        medal_score=2,
+        # 66 座城市的大棋盘：桌面翻开 4 张城市卡，否则得分太慢（实测 3 张时 1200 回合还打不完）
+        shared_cards=4,
     )
