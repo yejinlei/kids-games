@@ -467,6 +467,11 @@
         // 个别城市的标签位置手工指定，优先于自动避让
         const overrides = {
           '敦煌': { dx: -13, dy: 4, anchor: 'end' },  // 放到城市点左侧，避开三线交汇处
+          '洛阳': { dx: -13, dy: 4, anchor: 'end' },  // 郑州以西
+          '苏州': { dx: 0, dy: 20, anchor: 'middle' }, // 沪宁之间，放下方
+          '遵义': { dx: 14, dy: 4, anchor: 'start' },  // 贵阳以北，放右侧
+          '大理': { dx: -13, dy: 4, anchor: 'end' },  // 丽江以南、昆明以西
+          '呼伦贝尔': { dx: -13, dy: 4, anchor: 'end' }, // 哈尔滨西北
         };
         const opts = [
           { dx: 0, dy: -12, anchor: 'middle' },
