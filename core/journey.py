@@ -22,6 +22,17 @@ RANDOM_START = 'random'
 CHAT_MAX_LEN = 200      # 单条聊天字数上限
 CHAT_KEEP = 100         # 每个房间保留的聊天条数
 
+# 地图本身只有 5 种车票色（最多区分 5 名玩家）。房间支持到 10 人，因此额外补一组
+# 只用于「玩家身份」的颜色——不参与车票/线路，纯用于棋子和记分区分。
+EXTRA_PLAYER_COLORS = {
+    'orange': {'hex': '#e67e22', 'name': '橙'},
+    'teal':   {'hex': '#16a085', 'name': '青'},
+    'pink':   {'hex': '#e84393', 'name': '粉'},
+    'brown':  {'hex': '#8d6e63', 'name': '棕'},
+    'slate':  {'hex': '#546e7a', 'name': '灰蓝'},
+}
+MAX_PLAYERS = 10        # 房间总人数上限（含机器人）
+
 
 class JourneyRoom:
     def __init__(self, map_, room_id, password='', dice_count=None,
@@ -36,7 +47,7 @@ class JourneyRoom:
         # 官方规则：每回合固定掷 2 颗骰子；允许通过参数覆盖，但至少 1 颗
         self.dice_count = dice_count if (isinstance(dice_count, int) and dice_count >= 1) else self.M.DICE_PER_TURN
         self.ai_level = ai_level   # easy | normal，机器人难度
-        self.max_players = max(2, min(4, int(max_players)))  # 房间总人数上限（含机器人）
+        self.max_players = max(2, min(MAX_PLAYERS, int(max_players)))  # 房间总人数上限（含机器人）
         self.timeout = max(10, min(120, int(timeout)))
         self.players = {}          # pid -> player dict
         self.order = []            # 加入顺序（用于回合轮转）
@@ -119,8 +130,10 @@ class JourneyRoom:
 
     # ---------- 玩家管理 ----------
     def available_colors(self):
+        """可用玩家色：先用地图的车票色，用完再补 EXTRA_PLAYER_COLORS，保证 10 人不撞色。"""
         used = {p['color'] for p in self.players.values() if p['color']}
-        return [c for c in self.M.COLORS if c not in used]
+        return ([c for c in self.M.COLORS if c not in used] +
+                [c for c in EXTRA_PLAYER_COLORS if c not in used])
 
     def join(self, pid, name, sid, bot=False):
         if pid in self.players:
@@ -537,6 +550,7 @@ class JourneyRoom:
             'room_id': self.room_id,
             'state': self.state,
             'host_pid': self.host_pid,
+            'max_players': self.max_players,
             'dice_count': self.dice_count,
             'timeout': self.timeout,
             'win_score': self.win_score,

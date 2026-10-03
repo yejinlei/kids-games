@@ -27,8 +27,8 @@ SPEC = GameSpec(
         '达到目标分并停在秘密目的地上，立刻获胜',
         '开放规则：房主可调整目标分（10/15/20）与每回合步数（1-3 步）',
     ],
-    tags=['儿童', '世界地理', '世界历史', '2-4 人', '开放规则'],
-    max_players=4,
+    tags=['儿童', '世界地理', '世界历史', '2-10 人', '开放规则'],
+    max_players=10,
     views=['flat', 'globe'],
     # start_city：'cities'=让前端用地图城市列表填充下拉，'random'=开局随机揭晓
     options={'win_score': [10, 15, 20], 'steps_per_turn': [1, 2, 3],

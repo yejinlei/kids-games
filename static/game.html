@@ -194,9 +194,21 @@
       border: 1.5px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
       margin-top: 0; align-self: center; height: auto;
     }
-    /* 平面地图缩放控件：右上角 + / - / *（回到我所在的位置） */
-    .map-zoom {
+    /* 地图右上角工具区：只看卡 + 缩放；平面 / 球面共用同一位置与样式 */
+    .map-tools {
       position: absolute; top: 10px; right: 10px; z-index: 7;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    .map-tools .tool-btn {
+      width: 32px; height: 32px; margin: 0; padding: 0; border-radius: 10px;
+      border: 1px solid #c9d6e4; background: rgba(255,255,255,.94); color: #243447;
+      font-size: 15px; font-weight: 800; line-height: 1; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(31,43,61,.18);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .map-tools .tool-btn:hover { background: #fff; }
+    .map-tools .tool-btn.filter-on { background: var(--primary, #ff6b35); color: #fff; border-color: var(--primary, #ff6b35); }
+    .map-zoom {
       display: flex; flex-direction: column; align-items: center; gap: 6px;
     }
     .map-zoom .zbtn {
@@ -211,6 +223,9 @@
     .map-zoom .ztag {
       font-size: 11px; font-weight: 700; color: #5b6c82;
       background: rgba(255,255,255,.88); border-radius: 999px; padding: 1px 7px;
+    }
+    .board-area.dark .map-tools .tool-btn {
+      background: rgba(28,44,68,.95); color: #e8eef6; border-color: #3a5273;
     }
     .board-area.dark .map-zoom .zbtn {
       background: rgba(28,44,68,.95); color: #e8eef6; border-color: #3a5273;
@@ -440,19 +455,10 @@
 
       <div class="row">
         <label>总人数
-          <select id="maxPlayersSelect">
-            <option value="2">2 人</option>
-            <option value="3">3 人</option>
-            <option value="4" selected>4 人</option>
-          </select>
+          <select id="maxPlayersSelect"><!-- 2..10 由 JS 生成 --></select>
         </label>
         <label>机器人
-          <select id="botCountSelect">
-            <option value="0" selected>0（无机器人）</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-          </select>
+          <select id="botCountSelect"><!-- 0..N-1 由 JS 生成 --></select>
         </label>
       </div>
 
@@ -524,7 +530,6 @@
       <div class="board-head">
         <span id="turnInfo" class="turn-info">准备中…</span>
         <span class="head-right">
-          <button id="cardOnlyBtn" class="btn ghost small hidden" title="只看城市卡上的城市（再点还原全部城市）">👁 只看卡</button>
           <button id="viewBtn" class="btn ghost small hidden" title="切换平面地图 / 球面地球">🗺 平面</button>
           <select id="globeStyleSel" class="globe-style hidden"
                   title="球面风格（只影响你自己的画面，不影响其他玩家）">
@@ -541,11 +546,14 @@
         <!-- 球面：three.js 贴图地球（WebGL，在下） + 航线/城市/棋子的 2D 覆盖层（在上） -->
         <canvas id="globe3d" class="globe3d hidden"></canvas>
         <canvas id="globe" class="globe hidden"></canvas>
-        <div id="mapZoom" class="map-zoom">
-          <button id="zoomInBtn" class="zbtn" title="放大地图">+</button>
-          <button id="zoomOutBtn" class="zbtn" title="缩小地图">−</button>
-          <button id="zoomMeBtn" class="zbtn star" title="回到我所在的位置">*</button>
-          <span id="zoomTag" class="ztag">1.0×</span>
+        <div class="map-tools">
+          <button id="cardOnlyBtn" class="tool-btn hidden" title="只看城市卡上的城市（再点还原全部城市）">👁</button>
+          <div id="mapZoom" class="map-zoom">
+            <button id="zoomInBtn" class="zbtn" title="放大地图">+</button>
+            <button id="zoomOutBtn" class="zbtn" title="缩小地图">−</button>
+            <button id="zoomMeBtn" class="zbtn star" title="回到我所在的位置">*</button>
+            <span id="zoomTag" class="ztag">1.0×</span>
+          </div>
         </div>
         <div id="diceArea" class="dice-area"></div>
       </div>
@@ -682,13 +690,19 @@
         clearTimeout(toast._t);
         toast._t = setTimeout(() => t.classList.add('hidden'), 2200);
       }
+      // 车票只有 5 色，第 6 人起由服务端分配下列额外的「玩家身份色」（不参与车票/线路）
+      const EXTRA_PLAYER_COLORS = {
+        orange: { hex: '#e67e22', name: '橙' }, teal: { hex: '#16a085', name: '青' },
+        pink: { hex: '#e84393', name: '粉' }, brown: { hex: '#8d6e63', name: '棕' },
+        slate: { hex: '#546e7a', name: '灰蓝' }
+      };
       function colorHex(c) {
         if (c === 'go') return '#444';
-        return (MAP.colors[c] && MAP.colors[c].hex) || '#999';
+        return (MAP.colors[c] && MAP.colors[c].hex) || (EXTRA_PLAYER_COLORS[c] && EXTRA_PLAYER_COLORS[c].hex) || '#999';
       }
       function colorName(c) {
         if (c === 'go') return 'GO';
-        return (MAP.colors[c] && MAP.colors[c].name) || c;
+        return (MAP.colors[c] && MAP.colors[c].name) || (EXTRA_PLAYER_COLORS[c] && EXTRA_PLAYER_COLORS[c].name) || c;
       }
       function me() {
         if (!state || !myPid) return null;
@@ -1301,8 +1315,8 @@
             const px = spread ? g.x + (i - (n - 1) / 2) * 14 : g.x;
             const py = spread ? g.y - 15 : g.y;
             const isMine = !!(V.my && p.pid === V.my.pid);
-            pawnDraws.push({ px: px, py: py, top: py - 20, p: p, isMine: isMine, d: g.d });
-            obstacles.push({ x1: px - 4, y1: py - 32, x2: px + (isMine ? 30 : 17), y2: py - 10 });
+            pawnDraws.push({ px: px, py: py, top: py - 24, p: p, isMine: isMine, d: g.d });
+            obstacles.push({ x1: px - 5, y1: py - 38, x2: px + (isMine ? 40 : 24), y2: py - 8 });
           });
           const others = V.my ? list.filter(function (p) { return p.pid !== V.my.pid; }) : list.slice();
           if (others.length) {
@@ -1364,22 +1378,33 @@
         });
         ctx.globalAlpha = 1;
 
-        // 棋子：旗杆 + 旗帜（与平面同形状、同颜色）
+        // 棋子：底座 + 旗杆 + 旗帜（与平面同形状、同颜色，加大加白描边更醒目）
         pawnDraws.forEach(function (pd) {
           ctx.globalAlpha = Math.min(1, 0.5 + 0.5 * pd.d);
-          ctx.strokeStyle = colorHex(pd.p.color); ctx.lineWidth = 2;
+          const hex = colorHex(pd.p.color);
+          const fw = 19, fh = 13;
+          // 落点圆标
+          ctx.beginPath(); ctx.arc(pd.px, pd.py, 3.6, 0, Math.PI * 2);
+          ctx.fillStyle = hex; ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.stroke();
+          // 旗杆
+          ctx.strokeStyle = hex; ctx.lineWidth = 2.6;
           ctx.beginPath(); ctx.moveTo(pd.px, pd.py); ctx.lineTo(pd.px, pd.top); ctx.stroke();
+          // 旗面（带波浪边的三角旗）
           ctx.beginPath();
-          ctx.moveTo(pd.px, pd.top); ctx.lineTo(pd.px + 13, pd.top + 4); ctx.lineTo(pd.px, pd.top + 8);
+          ctx.moveTo(pd.px, pd.top);
+          ctx.lineTo(pd.px + fw, pd.top + fh * 0.28);
+          ctx.quadraticCurveTo(pd.px + fw * 0.55, pd.top + fh * 0.55, pd.px + fw, pd.top + fh * 0.72);
+          ctx.lineTo(pd.px, pd.top + fh);
           ctx.closePath();
-          ctx.fillStyle = colorHex(pd.p.color); ctx.fill();
-          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+          ctx.fillStyle = hex; ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
           if (pd.isMine) {
             ctx.textAlign = 'left';
             ctx.lineWidth = 2.5; ctx.strokeStyle = halo;
-            ctx.strokeText('我', pd.px + 16, pd.top + 7);
+            ctx.strokeText('我', pd.px + fw + 3, pd.top + fh * 0.85);
             ctx.fillStyle = dark ? '#e8eef7' : '#243447';
-            ctx.fillText('我', pd.px + 16, pd.top + 7);
+            ctx.fillText('我', pd.px + fw + 3, pd.top + fh * 0.85);
           }
         });
         // 同城对手名字合并成一行，放在城市点下方（与平面一致）
@@ -1457,11 +1482,10 @@
         // 滚轮缩放（0.75x ~ 2.2x）
         cv.addEventListener('wheel', function (e) {
           e.preventDefault();
-          GLOBE.zoom = Math.max(0.75, Math.min(2.2, (GLOBE.zoom || 1) * (e.deltaY < 0 ? 1.12 : 0.89)));
-          GLOBE.dirty = true;
+          setGlobeZoom((GLOBE.zoom || 1) * (e.deltaY < 0 ? 1.12 : 0.89));
         }, { passive: false });
         // 双击复位缩放
-        cv.addEventListener('dblclick', function () { GLOBE.zoom = 1; GLOBE.dirty = true; });
+        cv.addEventListener('dblclick', function () { setGlobeZoom(1); });
         cv.addEventListener('click', function (e) {
           if (GLOBE.moved > 6) return;          // 拖动过就不当作点击
           const city = globeHitTest(e.clientX, e.clientY);
@@ -1489,8 +1513,9 @@
           gs.classList.toggle('hidden', !isGlobe || !ensureGlobe3D());
           gs.value = globeStyle;
         }
-        const zc = $('mapZoom');                       // 缩放控件只服务于平面地图
-        if (zc) zc.classList.toggle('hidden', isGlobe);
+        const zc = $('mapZoom');   // 缩放控件：平面 / 球面都要有（两个视图功能保持一致）
+        if (zc) zc.classList.remove('hidden');
+        updateZoomTag();
         try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) {}
         if (isGlobe) { syncGlobeStart(); buildGlobeDots(); GLOBE.dirty = true; startGlobeLoop(); }
         else if (state) { render(); }
@@ -1649,9 +1674,34 @@
         updateZoomTag();
       }
 
+      // 缩放倍数标签：哪个视图就显示哪个视图的倍数（平面 view.w / 球面 GLOBE.zoom）
       function updateZoomTag() {
         const t = $('zoomTag');
-        if (t) t.textContent = zoomLevel().toFixed(1) + '×';
+        if (!t) return;
+        const z = (viewMode === 'globe') ? (GLOBE.zoom || 1) : zoomLevel();
+        t.textContent = z.toFixed(1) + '×';
+      }
+
+      // 球面：与平面同一套按钮语义（放大 / 缩小 / 回到我），内部走 GLOBE.zoom
+      function setGlobeZoom(z) {
+        GLOBE.zoom = Math.max(0.75, Math.min(2.2, z));   // 与滚轮缩放同一区间
+        GLOBE.dirty = true;
+        updateZoomTag();
+        renderGlobe();
+      }
+      function focusGlobeMyCity() {
+        const m = me();
+        const city = (m && m.position) || currentStartCity() || (MAP && MAP.start);
+        const g = MAP && MAP.geo && MAP.geo[city];
+        if (!g) { toast('暂时无法定位'); return; }
+        GLOBE.yaw = g[0] * Math.PI / 180;
+        GLOBE.pitch = g[1] * Math.PI / 180;
+        GLOBE.init = true;
+        GLOBE.vy = 0;                 // 清掉惯性，避免刚对准就被甩走
+        GLOBE.dirty = true;
+        updateZoomTag();
+        renderGlobe();
+        toast('回到 ' + city);
       }
 
       function focusMyCity() {
@@ -1702,9 +1752,19 @@
           renderBoard();
         }, { passive: false });
 
-        $('zoomInBtn').addEventListener('click', function () { zoomAt(zoomLevel() * 1.5); renderBoard(); });
-        $('zoomOutBtn').addEventListener('click', function () { zoomAt(zoomLevel() / 1.5); renderBoard(); });
-        $('zoomMeBtn').addEventListener('click', focusMyCity);
+        // 三个缩放按钮：按当前视图分发，平面 / 球面表现一致
+        $('zoomInBtn').addEventListener('click', function () {
+          if (viewMode === 'globe') { setGlobeZoom((GLOBE.zoom || 1) * 1.25); return; }
+          zoomAt(zoomLevel() * 1.5); renderBoard();
+        });
+        $('zoomOutBtn').addEventListener('click', function () {
+          if (viewMode === 'globe') { setGlobeZoom((GLOBE.zoom || 1) / 1.25); return; }
+          zoomAt(zoomLevel() / 1.5); renderBoard();
+        });
+        $('zoomMeBtn').addEventListener('click', function () {
+          if (viewMode === 'globe') { focusGlobeMyCity(); return; }
+          focusMyCity();
+        });
       }
 
       // ================= 平面 / 球面共用的城市呈现规则 =================
@@ -1893,18 +1953,25 @@
             const px = spread ? base.x + (i - (n - 1) / 2) * 14 * s : base.x;
             const py = spread ? base.y - 15 * s : base.y;
             const isMine = my && p.pid === my.pid;
-            // 旗杆 + 旗帜（所有玩家统一，无底部圆球）
-            const top = py - 20 * s;
+            const hex = colorHex(p.color);
+            // 旗杆 + 旗帜（所有玩家统一）：底座圆点 + 加粗旗杆 + 白描边大旗面，远处也一眼可见
+            const top = py - 24 * s;
+            const fw = 19 * s, fh = 13 * s;
+            pawnsSvg += '<circle cx="' + px + '" cy="' + py + '" r="' + (3.6 * s).toFixed(2) +
+              '" fill="' + hex + '" stroke="#fff" stroke-width="' + (1.6 * s).toFixed(2) + '"/>';
             pawnsSvg += '<line class="pawn-pole" x1="' + px + '" y1="' + py + '" x2="' + px + '" y2="' + top +
-              '" stroke="' + colorHex(p.color) + '" stroke-width="' + (2 * s).toFixed(2) + '"/>';
+              '" stroke="' + hex + '" stroke-width="' + (2.6 * s).toFixed(2) + '"/>';
             pawnsSvg += '<path class="pawn-flag" d="M' + px + ' ' + top +
-              ' L' + (px + 13 * s) + ' ' + (top + 4 * s) + ' L' + px + ' ' + (top + 8 * s) + ' Z" fill="' +
-              colorHex(p.color) + '" stroke="#fff" stroke-width="' + (1.5 * s).toFixed(2) + '"/>';
+              ' L' + (px + fw) + ' ' + (top + fh * 0.28).toFixed(2) +
+              ' Q' + (px + fw * 0.55).toFixed(2) + ' ' + (top + fh * 0.55).toFixed(2) +
+              ' ' + (px + fw) + ' ' + (top + fh * 0.72).toFixed(2) +
+              ' L' + px + ' ' + (top + fh) + ' Z" fill="' + hex +
+              '" stroke="#fff" stroke-width="' + (2 * s).toFixed(2) + '" stroke-linejoin="round"/>';
             if (isMine) {
-              pawnsSvg += '<text class="pawn-tag" style="font-size:' + (11 * s).toFixed(1) + 'px" x="' +
-                (px + 16 * s) + '" y="' + (top + 7 * s) + '" text-anchor="start">我</text>';
+              pawnsSvg += '<text class="pawn-tag" style="font-size:' + (12 * s).toFixed(1) + 'px" x="' +
+                (px + fw + 3 * s) + '" y="' + (top + fh * 0.85).toFixed(2) + '" text-anchor="start">我</text>';
             }
-            pawnBoxes.push({ x1: px - 4 * s, y1: top - 12 * s, x2: px + (isMine ? 30 : 17) * s, y2: top + 10 * s });
+            pawnBoxes.push({ x1: px - 5 * s, y1: top - 4 * s, x2: px + (fw + (isMine ? 18 : 4) * s), y2: py + 5 * s });
           });
           // 同城所有对手的名字合并成一行，放在城市点下方
           const others = my ? list.filter(function (p) { return p.pid !== my.pid; }) : [];
@@ -2130,7 +2197,8 @@
         // 移动阶段点击高亮城市走一步，走完自动结束本回合
         const inLobby = state.state === 'lobby';
         const bots = state.players.filter(function (p) { return p.bot; }).length;
-        $('addBotBtn').classList.toggle('hidden', !(inLobby && isHost && state.players.length < 4));
+        const cap = state.max_players || 4;
+        $('addBotBtn').classList.toggle('hidden', !(inLobby && isHost && state.players.length < cap));
         $('removeBotBtn').classList.toggle('hidden', !(inLobby && isHost && bots > 0));
         // 出发城市：等待阶段房主可改，其他人只读；开局后仅展示
         renderStartCityBar(isHost, inLobby);
@@ -2388,6 +2456,38 @@
         socket.emit('end_turn', { room_id: myRoom, player_id: myPid });
       });
       initBoardZoom();   // 平面地图：右上角 + / - / *（缩放与回到我所在的位置）
+
+      // 建房人数：总人数最多 10 人；机器人最多 N-1（始终给真人留一个位置）
+      function initPlayerCountSelects() {
+        const ms = $('maxPlayersSelect'), bs = $('botCountSelect');
+        if (!ms || !bs) return;
+        const specMax = (GAME_SPEC && GAME_SPEC.max_players) ? GAME_SPEC.max_players : 10;
+        const hardMax = Math.min(10, Math.max(2, specMax));
+        ms.innerHTML = '';
+        for (let n = 2; n <= hardMax; n++) {
+          const o = document.createElement('option');
+          o.value = String(n); o.textContent = n + ' 人';
+          ms.appendChild(o);
+        }
+        ms.value = String(Math.min(4, hardMax));
+        const syncBots = function (keepValue) {
+          const n = parseInt(ms.value, 10);
+          const cur = keepValue ? parseInt(bs.value, 10) : NaN;
+          bs.innerHTML = '';
+          for (let k = 0; k <= n - 1; k++) {
+            const o = document.createElement('option');
+            o.value = String(k); o.textContent = k === 0 ? '0（无机器人）' : String(k);
+            bs.appendChild(o);
+          }
+          // 默认 N-1：一人开局其余全由机器人填充
+          bs.value = String(isNaN(cur) ? n - 1 : Math.min(cur, n - 1));
+        };
+        // 用户手动选过机器人数量就尊重其选择；否则总人数一变就自动补到 N-1
+        let touched = false;
+        bs.addEventListener('change', function () { touched = true; });
+        ms.addEventListener('change', function () { syncBots(touched); });
+        syncBots(false);
+      }
       // 房主在对局中改出发城市（仅等待阶段有效，服务端会校验）
       $('startCitySelect2').addEventListener('change', function () {
         if (!state || state.state !== 'lobby') return;
@@ -2479,6 +2579,7 @@
           lobbyMsg.classList.remove('hidden');
         }
         await loadGameSpec();   // 元信息决定可用视图与可选规则
+        initPlayerCountSelects();   // 元信息就绪后再生成人数 / 机器人数下拉
         initSocket();
         initGlobeInteractions();
         applyView();

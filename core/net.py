@@ -17,7 +17,7 @@ import uuid
 from flask import jsonify, request
 from flask_socketio import emit
 
-from core.journey import JourneyRoom, GameError
+from core.journey import JourneyRoom, GameError, MAX_PLAYERS
 import core.ai as ai
 
 
@@ -82,11 +82,17 @@ def register_game(app, socketio, spec):
                 socketio.emit('state', room.serialize(pid), to=sid, namespace=ns)
 
     def bot_display_name(room):
+        """机器人取名：先用固定名字池，用完自动编号（支持 N-1 个机器人）。"""
         used = {p['name'] for p in room.players.values()}
         for n in BOT_NAMES:
             if n not in used:
                 return n
-        return '🤖旅伴' + str(len(room.players) + 1)
+        i = 1
+        while True:
+            n = '🤖旅伴' + str(i)
+            if n not in used:
+                return n
+            i += 1
 
     def maybe_bot_turn(room):
         """若当前回合是机器人，启动它的自动行动（后台任务）。"""
@@ -207,11 +213,12 @@ def register_game(app, socketio, spec):
         if ai_level not in ('easy', 'normal'):
             ai_level = 'normal'
         try:
-            max_players = max(2, min(4, int(data.get('max_players', 4) or 4)))
+            max_players = max(2, min(MAX_PLAYERS, int(data.get('max_players', 4) or 4)))
         except (TypeError, ValueError):
             max_players = 4
         try:
-            bot_count = max(0, min(3, int(data.get('bot_count', 0) or 0)))
+            # 机器人最多 N-1 个：至少给真人留一个位置
+            bot_count = max(0, min(max_players - 1, int(data.get('bot_count', 0) or 0)))
         except (TypeError, ValueError):
             bot_count = 0
         # 出发城市：房主指定，或 'random'（开局揭晓）；不传则沿用棋盘默认
@@ -237,7 +244,7 @@ def register_game(app, socketio, spec):
         with room.lock:
             room.join(pid, name, request.sid)
             # 创建时按设定加入机器人（受总人数上限约束）
-            can_add = min(bot_count, max_players - 1, 3)
+            can_add = min(bot_count, max_players - 1)
             for _ in range(can_add):
                 bot_pid = 'bot:' + uuid.uuid4().hex[:8]
                 room.join(bot_pid, bot_display_name(room), None, bot=True)

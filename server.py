@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""儿童棋牌大厅服务端：一个入口托管多款棋牌。
+"""儿童益智类游戏大厅服务端：一个入口托管多款棋牌。
 
 - `/`                大厅（按分类浏览）
 - `/g/<game_id>/`    具体某一款棋的页面（共用同一个客户端）
@@ -56,6 +56,6 @@ for _spec in GAMES:
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print('儿童棋牌大厅已启动: http://localhost:%d' % port)
+    print('儿童益智类游戏大厅已启动: http://localhost:%d' % port)
     print('已载入游戏: ' + '、'.join('%s(/g/%s/)' % (s.name, s.id) for s in GAMES))
     socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
