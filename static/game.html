@@ -584,8 +584,28 @@
       // ---------- 球面视图：Canvas 2D 正交投影（零依赖、可拖拽旋转）----------
       // 说明：不引 three.js / d3 是为了离线可用（CDN 拉不到时会白屏），
       // 而正交投影 + 点阵大陆 + 大圆弧航线已足够呈现立体地球。
+      // 球面默认静止：不自动旋转，只有拖拽（含松手后的短惯性）与滚轮缩放会改变视角
       const GLOBE = { yaw: 2.0, pitch: 0.4, drag: false, moved: 0, lx: 0, ly: 0,
-                      auto: true, dots: [], raf: 0, cx: 0, cy: 0, r: 0, init: false };
+                      dots: [], stars: null, raf: 0, cx: 0, cy: 0, r: 0,
+                      init: false, zoom: 1, vy: 0, dirty: true };
+
+      // 星空背景（固定随机，避免每帧闪烁；仅暗色主题绘制）
+      function drawStars(ctx, w, h, dark) {
+        if (!dark) return;
+        if (!GLOBE.stars) {
+          GLOBE.stars = [];
+          let seed = 20240921;
+          const rnd = function () { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+          for (let i = 0; i < 160; i++) GLOBE.stars.push([rnd(), rnd(), rnd()]);
+        }
+        ctx.fillStyle = '#ffffff';
+        for (let i = 0; i < GLOBE.stars.length; i++) {
+          const s = GLOBE.stars[i];
+          ctx.globalAlpha = 0.2 + s[2] * 0.55;
+          ctx.fillRect(s[0] * w, s[1] * h, 1.5, 1.5);
+        }
+        ctx.globalAlpha = 1;
+      }
 
       // 初始视角对准出发城市：可证明 yaw=经度、pitch=纬度 时该点正好落在球心
       function centerGlobeOn(city) {
@@ -690,18 +710,40 @@
         const ctx = cv.getContext('2d');
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
-        const cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.43;
+        const cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.43 * (GLOBE.zoom || 1);
         GLOBE.cx = cx; GLOBE.cy = cy; GLOBE.r = R;
         const dark = $('board').classList.contains('dark');
 
-        // 海洋球体：径向渐变模拟光照与明暗过渡
-        const g = ctx.createRadialGradient(cx - R * 0.35, cy - R * 0.4, R * 0.05, cx, cy, R * 1.05);
-        g.addColorStop(0, dark ? '#24486b' : '#eaf7fd');
-        g.addColorStop(0.55, dark ? '#16304c' : '#bfe3f4');
-        g.addColorStop(1, dark ? '#0a1728' : '#8cc5e0');
+        // 星空背景（暗色主题下），增强太空纵深
+        drawStars(ctx, w, h, dark);
+
+        // 大气光晕：球体外侧一圈辉光，强化"这是一个球"的观感
+        const glow = ctx.createRadialGradient(cx, cy, R * 0.97, cx, cy, R * 1.22);
+        glow.addColorStop(0, dark ? 'rgba(110,190,255,.30)' : 'rgba(110,195,255,.26)');
+        glow.addColorStop(1, 'rgba(110,195,255,0)');
+        ctx.beginPath(); ctx.arc(cx, cy, R * 1.22, 0, Math.PI * 2);
+        ctx.fillStyle = glow; ctx.fill();
+
+        // 海洋球体：径向渐变模拟主光源（左上方向）
+        const lx = cx - R * 0.38, ly = cy - R * 0.42;
+        const g = ctx.createRadialGradient(lx, ly, R * 0.05, cx, cy, R * 1.05);
+        g.addColorStop(0, dark ? '#2a527c' : '#f2fbff');
+        g.addColorStop(0.5, dark ? '#16304c' : '#bfe3f4');
+        g.addColorStop(1, dark ? '#091524' : '#7cb9d8');
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
         ctx.fillStyle = g; ctx.fill();
-        ctx.strokeStyle = dark ? 'rgba(120,170,220,.45)' : 'rgba(80,130,160,.55)';
+        // 边缘入射阴影：制造明暗交界与球体厚度感
+        const limb = ctx.createRadialGradient(cx, cy, R * 0.6, cx, cy, R);
+        limb.addColorStop(0, 'rgba(0,0,0,0)');
+        limb.addColorStop(1, dark ? 'rgba(0,0,0,.5)' : 'rgba(10,40,70,.32)');
+        ctx.fillStyle = limb; ctx.fill();
+        // 镜面高光
+        const spec = ctx.createRadialGradient(lx, ly, 0, lx, ly, R * 0.45);
+        spec.addColorStop(0, 'rgba(255,255,255,.28)');
+        spec.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = spec; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+        ctx.strokeStyle = dark ? 'rgba(120,170,220,.5)' : 'rgba(80,130,160,.5)';
         ctx.lineWidth = 1.5; ctx.stroke();
 
         // 经纬网（增强球体感）
@@ -718,14 +760,18 @@
           })(lon);
         }
 
-        // 陆地点阵
+        // 陆地点阵：按深度淡出并缩小（越靠边缘越淡越小，凸显球面弧度）
         ctx.fillStyle = dark ? '#4c7f57' : '#84c06d';
-        const dr = Math.max(1, R / 200);
+        const dr0 = Math.max(1, R / 200);
         for (let i = 0; i < GLOBE.dots.length; i++) {
           const p = projectVec(GLOBE.dots[i][0], GLOBE.dots[i][1]);
-          if (p.z <= 0) continue;
-          ctx.fillRect(cx + p.x * R - dr, cy + p.y * R - dr, dr * 2, dr * 2);
+          if (p.z <= 0.02) continue;
+          const d = p.z;                      // 1 = 正对观察者，0 = 地平线
+          const s = dr0 * (0.55 + 0.45 * d);
+          ctx.globalAlpha = 0.35 + 0.65 * d;
+          ctx.fillRect(cx + p.x * R - s, cy + p.y * R - s, s * 2, s * 2);
         }
+        ctx.globalAlpha = 1;
 
         // 航线（大圆弧）
         const moves = (state && state.moves) || [];
@@ -734,10 +780,14 @@
         (MAP.routes || []).forEach(function (r) {
           const ga = MAP.geo[r[0]], gb = MAP.geo[r[1]];
           if (!ga || !gb) return;
+          const pa = projectVec(ga[0], ga[1]), pb = projectVec(gb[0], gb[1]);
+          const k = Math.max(pa.z, pb.z);
+          if (k <= 0) return;                 // 整条线都在地球背面
+          const kk = Math.max(0.15, k);
           const hot = !!reach[r[0]] || !!reach[r[1]];
           ctx.strokeStyle = (MAP.colors[r[2]] || {}).hex || '#888';
-          ctx.globalAlpha = hot ? 0.95 : 0.3;
-          ctx.lineWidth = hot ? 3.2 : 1.6;
+          ctx.globalAlpha = (hot ? 0.95 : 0.3) * (0.4 + 0.6 * kk);
+          ctx.lineWidth = (hot ? 3.2 : 1.6) * (0.65 + 0.35 * kk);
           strokePath3D(ctx, cx, cy, R, greatCircle(ga, gb, 24));
         });
         ctx.globalAlpha = 1;
@@ -748,19 +798,24 @@
         Object.keys(MAP.geo).forEach(function (name) {
           const gg = MAP.geo[name];
           const p = projectVec(gg[0], gg[1]);
-          if (p.z <= 0) return;
+          if (p.z <= 0.03) return;
+          const d = p.z;
           const x = cx + p.x * R, y = cy + p.y * R;
           const hot = !!reach[name];
+          ctx.globalAlpha = 0.45 + 0.55 * d;
           if (hot) {
-            ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2);
+            ctx.beginPath(); ctx.arc(x, y, 10 * (0.7 + 0.3 * d), 0, Math.PI * 2);
             ctx.strokeStyle = 'rgba(255,107,53,.9)'; ctx.lineWidth = 2; ctx.stroke();
           }
-          ctx.beginPath(); ctx.arc(x, y, hot ? 5 : 3.6, 0, Math.PI * 2);
+          ctx.beginPath(); ctx.arc(x, y, (hot ? 5 : 3.6) * (0.65 + 0.35 * d), 0, Math.PI * 2);
           ctx.fillStyle = hot ? '#ff6b35' : (dark ? '#f2ead9' : '#6b5442');
           ctx.fill();
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; ctx.stroke();
-          ctx.fillStyle = dark ? '#e8eef7' : '#243447';
-          ctx.fillText(name, x + 7, y + 4);
+          if (d > 0.32) {                     // 太靠边缘就不写名字，避免标签糊成一片
+            ctx.fillStyle = dark ? '#e8eef7' : '#243447';
+            ctx.fillText(name, x + 7, y + 4);
+          }
+          ctx.globalAlpha = 1;
         });
 
         // 当前所在城市高亮圈
@@ -777,8 +832,15 @@
 
       function globeLoop() {
         if (viewMode !== 'globe') { GLOBE.raf = 0; return; }
-        if (GLOBE.auto && !GLOBE.drag) GLOBE.yaw += 0.0022;
-        renderGlobe();
+        // 不自动旋转：只有拖拽松手后的惯性会继续转一小会儿，随后自然停住
+        let moving = false;
+        if (!GLOBE.drag && Math.abs(GLOBE.vy) > 1e-4) {
+          GLOBE.yaw += GLOBE.vy;
+          GLOBE.vy *= 0.92;                 // 惯性衰减
+          moving = true;
+        }
+        // 静止时不做无谓重绘，省 CPU
+        if (moving || GLOBE.dirty) { renderGlobe(); GLOBE.dirty = false; }
         GLOBE.raf = requestAnimationFrame(globeLoop);
       }
       function startGlobeLoop() {
@@ -816,12 +878,22 @@
           GLOBE.moved += Math.abs(dx) + Math.abs(dy);
           GLOBE.yaw += dx * 0.006;
           GLOBE.pitch = Math.max(-1.2, Math.min(1.2, GLOBE.pitch + dy * 0.006));
+          GLOBE.vy = dx * 0.006;            // 记录速度，松手后作为惯性
+          GLOBE.dirty = true;
         });
         const endDrag = function () {
           GLOBE.drag = false; cv.classList.remove('dragging');
         };
         cv.addEventListener('pointerup', endDrag);
         cv.addEventListener('pointercancel', endDrag);
+        // 滚轮缩放（0.75x ~ 2.2x）
+        cv.addEventListener('wheel', function (e) {
+          e.preventDefault();
+          GLOBE.zoom = Math.max(0.75, Math.min(2.2, (GLOBE.zoom || 1) * (e.deltaY < 0 ? 1.12 : 0.89)));
+          GLOBE.dirty = true;
+        }, { passive: false });
+        // 双击复位缩放
+        cv.addEventListener('dblclick', function () { GLOBE.zoom = 1; GLOBE.dirty = true; });
         cv.addEventListener('click', function (e) {
           if (GLOBE.moved > 6) return;          // 拖动过就不当作点击
           const city = globeHitTest(e.clientX, e.clientY);
@@ -837,7 +909,7 @@
         if (bd) bd.classList.toggle('hidden', isGlobe);
         if (vb) vb.textContent = isGlobe ? '🌍 球面' : '🗺 平面';
         try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) {}
-        if (isGlobe) { buildGlobeDots(); startGlobeLoop(); }
+        if (isGlobe) { buildGlobeDots(); GLOBE.dirty = true; startGlobeLoop(); }
         else if (state) { render(); }
       }
 
