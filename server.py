@@ -135,18 +135,24 @@ def bot_play(room, pid):
         broadcast(room)
     time.sleep(0.7)
 
-    for _ in range(15):     # 最多尝试若干步；官方每回合只能走 1 步，走完即自动结束
+    for _ in range(15):     # 官方每回合只能走 1 步，走完回合已自动结束
+        moved = False
         with room.lock:
+            # 注意：这里必须 break 而非 return，否则会跳过循环后的
+            # schedule_timer / maybe_bot_turn，导致下一回合无人驱动而卡死
             if room.state != 'playing' or room.current_pid != pid or room.phase != 'move':
-                return
+                break
             city = ai.next_step(room, pid, room.ai_level)
             if not city:
                 break
             try:
                 room.move(pid, city)
+                moved = True
             except GameError:
                 break
             broadcast(room)
+        if moved:
+            break           # 走完一步回合已自动推进，交给循环后的收尾逻辑
         time.sleep(0.6)
 
     with room.lock:
