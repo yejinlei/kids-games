@@ -135,7 +135,7 @@ def bot_play(room, pid):
         broadcast(room)
     time.sleep(0.7)
 
-    for _ in range(15):     # 最多走 15 步，防止异常死循环
+    for _ in range(15):     # 最多尝试若干步；官方每回合只能走 1 步，走完即自动结束
         with room.lock:
             if room.state != 'playing' or room.current_pid != pid or room.phase != 'move':
                 return
@@ -150,13 +150,17 @@ def bot_play(room, pid):
         time.sleep(0.6)
 
     with room.lock:
-        if room.state == 'playing' and room.current_pid == pid:
+        # 若一步都没走成（仍在该机器人回合），则结束回合（结算/轮空）
+        if room.state == 'playing' and room.current_pid == pid and room.phase == 'move':
             try:
-                room.end_turn(pid)      # 结束移动时结算城市卡
+                room.end_turn(pid)
             except GameError:
-                return
+                pass
             broadcast(room)
-            maybe_bot_turn(room)        # 下一位可能也是机器人
+    # 移动已自动结束本回合：为下一回合排程超时定时器，并触发下一位机器人
+    if room.state == 'playing':
+        schedule_timer(room)
+        maybe_bot_turn(room)
 
 
 def schedule_timer(room):
@@ -200,7 +204,7 @@ def create_room(data):
     data = data or {}
     name = (data.get('name') or '玩家').strip()[:12] or '玩家'
     password = (data.get('password') or '').strip()
-    dice_count = int(data.get('dice_count', 1) or 1)
+    dice_count = max(1, int(data.get('dice_count', 2) or 2))
     timeout = int(data.get('timeout', 30) or 30)
     ai_level = (data.get('ai_level') or 'normal').strip()
     if ai_level not in ('easy', 'normal'):
@@ -373,6 +377,10 @@ def move(data):
             emit('error', {'msg': str(e)})
             return
         broadcast(room)
+    # 移动一次后引擎已自动结束本回合：为下一回合排程定时器并触发可能的机器人
+    if room.state == 'playing':
+        schedule_timer(room)
+        maybe_bot_turn(room)
 
 
 @socketio.on('end_turn')

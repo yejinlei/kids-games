@@ -17,11 +17,11 @@ class GameError(Exception):
 
 
 class GameRoom:
-    def __init__(self, room_id, password='', dice_count=1, timeout=30, ai_level='normal', max_players=4):
+    def __init__(self, room_id, password='', dice_count=None, timeout=30, ai_level='normal', max_players=4):
         self.room_id = room_id
         self.password = password
-        # 官方规则：每回合固定掷 2 颗骰子
-        self.dice_count = DICE_PER_TURN
+        # 官方规则：每回合固定掷 2 颗骰子；允许通过参数覆盖，但至少 1 颗
+        self.dice_count = dice_count if (isinstance(dice_count, int) and dice_count >= 1) else DICE_PER_TURN
         self.ai_level = ai_level   # easy | normal，机器人难度
         self.max_players = max(2, min(4, int(max_players)))  # 房间总人数上限（含机器人）
         self.timeout = max(10, min(120, int(timeout)))
@@ -178,7 +178,7 @@ class GameRoom:
 
     def move(self, pid, neighbor, color=None):
         """走【一步】：沿一条相邻线路移动，消耗该颜色车票（GO 可顶替）。
-        本回合可以继续点击继续走，直到点"结束回合"才结束这次移动。
+        官方规则：每回合只能沿一条线路移动一次，移动后立即结束本回合。
         """
         if self.state != 'playing':
             raise GameError('游戏未开始')
@@ -208,6 +208,8 @@ class GameRoom:
         self.move_path.append(neighbor)
         self.log.append(
             f'{p["name"]} 沿{COLORS[route["color"]]["name"]}色线路消耗 {route["cost"]} 张票，前往 {neighbor}')
+        # 官方规则：每回合只能移动一次，移动后立即结束本回合
+        self._advance()
 
     def _claims(self, p, path=None):
         city = p['position']
@@ -223,22 +225,17 @@ class GameRoom:
             self.shared_cards[idx] = self.deck.pop() if self.deck else None
         # 秘密目的地：只有【当前停留】在秘密目的地才算到达（途经不算）
         arrived = (city == p['secret'])
-        if arrived and not p['goal_done']:
+        if arrived and p['score'] >= WIN_SCORE:
+            p['goal_done'] = True
             self.log.append(f'{p["name"]} 抵达秘密目的地 {city}！')
-        p['goal_done'] = arrived
-        # 获胜条件：分数 ≥ WIN_SCORE 且 当前停留在秘密目的地，两者同时满足
-        if p['score'] >= WIN_SCORE and arrived and p['pid'] not in self.finish_order:
-            self.finish_order.append(p['pid'])
-            self.log.append(f'🏁 {p["name"]} 达成目标！（第 {len(self.finish_order)} 位）')
-            # N 人局：只剩 1 人未达成（即 N-1 人完成）时，游戏才结束
-            active = [q for q in self.players.values()
-                      if not (q['position'] == q['secret'] and q['score'] >= WIN_SCORE)]
-            if len(active) <= 1:
-                self.state = 'finished'
-                self.winner = self.finish_order[0]
-                self.phase = 'done'
-                self.timer_deadline = None
-                self.log.append(f'🎉 游戏结束！{self.players[self.winner]["name"]} 获胜！')
+        # 获胜条件（官方）：分数 ≥ WIN_SCORE 且 当前停留在秘密目的地，立即获胜并结束游戏
+        if self.state == 'playing' and p['score'] >= WIN_SCORE and arrived:
+            self.state = 'finished'
+            self.winner = p['pid']
+            self.phase = 'done'
+            self.timer_deadline = None
+            self.log.append(f'🎉 游戏结束！{p["name"]} 抵达秘密目的地，达成目标，获胜！')
+            return
 
     # ---------- 回合结束 ----------
     def end_turn(self, pid):
@@ -264,8 +261,8 @@ class GameRoom:
         self.begin_turn()
 
     def _finalize_move(self):
-        """这次移动结束（点结束回合 / 超时）时结算：
-        只有【最后停留的城市】能拿城市卡；移动【经过】的城市可用于判定秘密目的地。
+        """本回合移动结束（点结束回合 / 移动一次后自动 / 超时）时结算：
+        只有【最后停留的城市】能拿城市卡，也只有它用于判定秘密目的地（途经不算）。
         """
         pid, path = self.current_pid, self.move_path
         self.move_path = []

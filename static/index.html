@@ -727,7 +727,7 @@
         else tm.classList.add('hidden');
 
         $('startBtn').classList.toggle('hidden', !(state.state === 'lobby' && isHost));
-        // 移动阶段可持续点击走多步，随时可结束回合
+        // 移动阶段点击高亮城市走一步，走完自动结束本回合
         const inLobby = state.state === 'lobby';
         const bots = state.players.filter(function (p) { return p.bot; }).length;
         $('addBotBtn').classList.toggle('hidden', !(inLobby && isHost && state.players.length < 4));
@@ -750,12 +750,12 @@
           da.innerHTML = '';
         }
 
-        // 移动阶段提示：可继续走，也可结束回合
+        // 移动阶段提示：每回合只能走一步，走完自动结束本回合
         const hint = $('moveHint');
         if (isMyTurn && state.phase === 'move') {
           const n = (state.moves || []).length;
           hint.textContent = n
-            ? '🖱 点击高亮城市走一步（可继续走多步），走完点“结束回合”'
+            ? '🖱 点击高亮城市走一步（走完自动结束本回合）'
             : '🚫 没有可走的线路了，点“结束回合”继续';
           hint.classList.remove('hidden');
         } else {
