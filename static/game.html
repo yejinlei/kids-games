@@ -1461,23 +1461,85 @@
         ctx.globalAlpha = 1;
       }
 
-      // ---------- 地标气泡：钻到国家 / 城市层才浮现地标与票价 ----------
+      // ---------- 城市层：标出从这座城出发的每条航线要几张票 ----------
+      function drawRouteFares(ctx, cx, cy, R, dark) {
+        if ((GLOBE.zoom || 1) < 4.6) return;
+        const c = globeCenterCity();
+        if (!c) return;
+        ctx.save();
+        ctx.font = '800 11px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        (MAP.routes || []).forEach(function (r) {
+          if (r[0] !== c && r[1] !== c) return;
+          const other = (r[0] === c) ? r[1] : r[0];
+          const ga = MAP.geo[c], gb = MAP.geo[other];
+          if (!ga || !gb) return;
+          const pts = greatCircle(ga, gb, 24);
+          const mv = rotateVec(pts[Math.floor(pts.length / 2)], GLOBE.yaw, GLOBE.pitch);
+          if (mv[2] <= 0.08) return;                    // 背面不标
+          const x = cx + mv[0] * R, y = cy - mv[1] * R;
+          const hex = (MAP.colors[r[2]] || {}).hex || '#888';
+          const t = (r[3] || 1) + '票';
+          const bw2 = Math.max(32, ctx.measureText(t).width + 12), bh2 = 16;
+          const bx = x - bw2 / 2, by = y - bh2 / 2, rr = 8;
+          ctx.globalAlpha = Math.min(1, 0.55 + 0.45 * mv[2]);
+          ctx.fillStyle = hex;
+          ctx.beginPath();
+          ctx.moveTo(bx + rr, by);
+          ctx.arcTo(bx + bw2, by, bx + bw2, by + bh2, rr);
+          ctx.arcTo(bx + bw2, by + bh2, bx, by + bh2, rr);
+          ctx.arcTo(bx, by + bh2, bx, by, rr);
+          ctx.arcTo(bx, by, bx + bw2, by, rr);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.fillText(t, x, y + 4);
+        });
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        ctx.textAlign = 'left';
+      }
+
+      // 两城之间的大圆距离（公里）——下钻后告诉孩子"还有多远"
+      function cityKm(a, b) {
+        const ga = MAP.geo[a], gb = MAP.geo[b];
+        if (!ga || !gb) return 0;
+        const va = lonLatVec(ga[0], ga[1]), vb = lonLatVec(gb[0], gb[1]);
+        const d = Math.max(-1, Math.min(1, va[0] * vb[0] + va[1] * vb[1] + va[2] * vb[2]));
+        return Math.round(6371 * Math.acos(d));
+      }
+
+      // ---------- 下钻信息浮层：国家层给地标票价，城市层给完整"城市明信片" ----------
       function drawSightBadges(ctx, items, dark, gz) {
-        if ((GLOBE.zoom || 1) < 3.2) return;
+        const z = GLOBE.zoom || 1;
+        if (z < 3.2) return;
+        const full = z >= 4.6;                       // 城市层：展开全部信息
+        const m = me();
+        const myPos = m && m.position;
         const cand = items.filter(function (it) { return it.d > 0.45 && CITY_INFO[it.name]; })
           .sort(function (a, b) { return (a.prio - b.prio) || (b.d - a.d); })
-          .slice(0, 6);
+          .slice(0, full ? 2 : 6);
         ctx.save();
         ctx.font = '700 ' + (11 * Math.min(1.4, gz)).toFixed(1) + 'px system-ui, -apple-system, sans-serif';
         cand.forEach(function (it) {
           const info = CITY_INFO[it.name];
-          const lines = [(info.flag ? info.flag + ' ' : '') + it.name];
+          const been = !!(m && m.passport && m.passport[it.name]);
+          const lines = [(info.flag ? info.flag + ' ' : '') + it.name +
+                         ' · ' + cityPoints(it.name) + ' 分' + (been ? ' ✅' : '')];
           if (info.sight) lines.push('📍 ' + info.sight);
+          if (full && info.food) lines.push('🍽 ' + info.food);
+          if (full && info.hello) lines.push('💬 ' + info.hello);
+          if (full && typeof info.year === 'number') lines.push('🏛 关键年份 ' + yearText(info.year));
           if (it.f && it.f.cost) lines.push('🎫 ' + it.f.cost + ' 票');
+          if (full && myPos && myPos !== it.name) lines.push('✈ 距 ' + myPos + ' ' + cityKm(myPos, it.name) + ' km');
+          if (full) lines.push('👆 点城市看知识卡');
+          // 过长的说明截断，气泡宽度可控；再夹在画布内，避免被边缘裁掉
+          const capd = lines.map(function (t) { return t.length > 22 ? t.slice(0, 21) + '…' : t; });
           let wmax = 0;
-          lines.forEach(function (t) { wmax = Math.max(wmax, ctx.measureText(t).width); });
-          const pad = 6, lh = 14, bw = wmax + pad * 2, bh = lines.length * lh + pad * 1.4;
-          const bx = it.x + 12, by = it.y - bh / 2;
+          capd.forEach(function (t) { wmax = Math.max(wmax, ctx.measureText(t).width); });
+          const pad = 6, lh = 14, bw = wmax + pad * 2, bh = capd.length * lh + pad * 1.4;
+          const bx = Math.max(6, Math.min(it.x + 12, GLOBE.cx * 2 - bw - 6));
+          const by = Math.max(6, Math.min(it.y - bh / 2, GLOBE.cy * 2 - bh - 6));
           ctx.globalAlpha = Math.min(1, 0.55 + 0.45 * it.d);
           ctx.fillStyle = dark ? 'rgba(14,24,42,.92)' : 'rgba(255,255,255,.95)';
           ctx.strokeStyle = dark ? 'rgba(120,160,210,.6)' : 'rgba(120,140,165,.5)';
@@ -1492,7 +1554,7 @@
           ctx.closePath();
           ctx.fill(); ctx.stroke();
           ctx.textAlign = 'left';
-          lines.forEach(function (t, i) {
+          capd.forEach(function (t, i) {
             ctx.fillStyle = i === 0
               ? (it.f && it.f.reach ? '#ff6b35' : (dark ? '#e8eef7' : '#243447'))
               : (dark ? '#9fb2c8' : '#5b6b7f');
@@ -1679,6 +1741,8 @@
 
         // 航迹云：把我走过的路连成发光拖尾（越近的旅途越亮）
         drawTrail(ctx, cx, cy, R);
+        // 城市层：把从这座城出发的每条航线的票价标在航线上
+        drawRouteFares(ctx, cx, cy, R, dark);
 
         // ---- 城市 / 标签 / 棋子：与平面视图同一套状态、颜色、优先级与避让规则 ----
         // 下钻后细节放大：城市点/名字随缩放略增（1× 时不变，最多 2×），越贴近越清楚
