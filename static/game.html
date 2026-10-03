@@ -877,7 +877,7 @@
       // 球面默认静止：不自动旋转，只有拖拽（含松手后的短惯性）与滚轮缩放会改变视角
       const GLOBE = { yaw: 2.0, pitch: 0.4, drag: false, moved: 0, lx: 0, ly: 0,
                       dots: [], stars: null, raf: 0, cx: 0, cy: 0, r: 0,
-                      init: false, zoom: 1, vy: 0, dirty: true };
+                      init: false, zoom: 1, vy: 0, dirty: true, anim: null };
 
       // 星空背景（固定随机，避免每帧闪烁；仅暗色主题绘制）
       function drawStars(ctx, w, h, dark) {
@@ -1120,6 +1120,64 @@
         const v = rotateVec(lonLatVec(lon, lat), GLOBE.yaw, GLOBE.pitch);
         return { x: v[0], y: -v[1], z: v[2] };   // 屏幕 y 轴向下
       }
+      // ---------- 球面下钻：屏幕点 ↔ 经纬度，以及「把某点转到指定屏幕位置」的求解 ----------
+      // 屏幕单位偏移(ux,uy)（球心为原点、y 轴向下、半径=1）→ 经纬度(弧度)；球外返回 null
+      function globeUnproject(ux, uy) {
+        const d2 = ux * ux + uy * uy;
+        if (d2 > 1) return null;
+        return globeVecToLonLat([ux, -uy, Math.sqrt(1 - d2)]);
+      }
+      // 已旋转向量 → 经纬度(弧度)：即 rotateVec 的逆运算
+      function globeVecToLonLat(r) {
+        const sp = Math.sin(GLOBE.pitch), cp = Math.cos(GLOBE.pitch);
+        const y = r[1] * cp + r[2] * sp, z0 = -r[1] * sp + r[2] * cp;
+        const sy = Math.sin(GLOBE.yaw), cy = Math.cos(GLOBE.yaw);
+        const x = r[0] * cy + z0 * sy, z = -r[0] * sy + z0 * cy;
+        return [Math.atan2(x, z), Math.asin(Math.max(-1, Math.min(1, y)))];
+      }
+      function globeAngDiff(a, b) {   // a-b 归一到 [-π,π]，取最短转向
+        let d = (a - b) % (Math.PI * 2);
+        if (d > Math.PI) d -= Math.PI * 2;
+        if (d < -Math.PI) d += Math.PI * 2;
+        return d;
+      }
+      // 求 yaw/pitch，使 (lon,lat)（弧度）投影到屏幕单位偏移 (tx,ty)。
+      // 推导：yaw 只能把该点沿所在纬线转（保持 y=sin(lat)），pitch 再绕 X 轴把 (y,z) 旋到目标，
+      // 因此目标 x 必须满足 |tx| <= cos(lat)；两支解取转动量更小的那支。
+      function globeFocus(lon, lat, tx, ty) {
+        const r = Math.cos(lat), yp = Math.sin(lat);
+        const lim = r * 0.999;
+        if (tx > lim) tx = lim; else if (tx < -lim) tx = -lim;
+        const rem = Math.sqrt(Math.max(0, 1 - tx * tx));
+        if (ty > rem) ty = rem; else if (ty < -rem) ty = -rem;
+        const tz = Math.sqrt(Math.max(0, 1 - tx * tx - ty * ty));
+        const a0 = Math.atan2(r * Math.cos(lon), r * Math.sin(lon));   // 当前经度的 xz 相位
+        const beta = Math.atan2(tz, -ty);                              // 目标 (y,z) 相位
+        let best = null;
+        [1, -1].forEach(function (s) {
+          const u3 = s * Math.sqrt(Math.max(0, r * r - tx * tx));
+          const yaw = Math.atan2(u3, tx) - a0;
+          const pitch = beta - Math.atan2(u3, yp);
+          let cost = Math.abs(globeAngDiff(yaw, GLOBE.yaw)) + Math.abs(pitch - GLOBE.pitch);
+          if (Math.abs(pitch) > 1.2) cost += 10;                        // 超出俯仰限制的解重罚
+          if (!best || cost < best.cost) best = { yaw: yaw, pitch: pitch, cost: cost };
+        });
+        return best;
+      }
+      // 平滑飞向目标视角（yaw 走最短路径，zoom 用指数插值让快慢视觉均匀）
+      function globeAnimTo(yaw, pitch, zoom, ms) {
+        GLOBE.anim = { t0: performance.now(), ms: ms || 420,
+          y0: GLOBE.yaw, y1: yaw,
+          p0: GLOBE.pitch, p1: Math.max(-1.2, Math.min(1.2, pitch)),
+          z0: GLOBE.zoom || 1, z1: Math.max(0.3, Math.min(6, zoom)) };
+        GLOBE.vy = 0; GLOBE.dirty = true; startGlobeLoop();
+      }
+      // 把某经纬度转到球心并缩放到 z：真正的「下钻」
+      function globeDrillTo(lon, lat, zoom, ms) {
+        const f = globeFocus(lon, lat, 0, 0);
+        if (!f) return;
+        globeAnimTo(GLOBE.yaw + globeAngDiff(f.yaw, GLOBE.yaw), f.pitch, zoom, ms);
+      }
       function pointInPoly(x, y, poly) {
         let inside = false;
         for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -1289,7 +1347,9 @@
         ctx.globalAlpha = 1;
 
         // ---- 城市 / 标签 / 棋子：与平面视图同一套状态、颜色、优先级与避让规则 ----
-        ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+        // 下钻后细节放大：城市点/名字随缩放略增（1× 时不变，最多 2×），越贴近越清楚
+        const gz = Math.max(1, Math.min(2, 0.85 + 0.45 * (GLOBE.zoom || 1)));
+        ctx.font = '600 ' + (11 * gz).toFixed(1) + 'px system-ui, -apple-system, sans-serif';
         ctx.textAlign = 'left';
         const items = [], pawnGroups = [];
         Object.keys(MAP.geo).forEach(function (name) {
@@ -1336,7 +1396,7 @@
           if (!show) { obstacles.push({ x1: it.x - 6, y1: it.y - 6, x2: it.x + 6, y2: it.y + 6 }); return; }
           it.txt = it.name + (it.f.cost ? it.f.cost + '票' : '');
           labelItems.push({ name: it.name, x: it.x, y: it.y, prio: it.prio,
-                            w: ctx.measureText(it.txt).width, h: 14 });
+                            w: ctx.measureText(it.txt).width, h: 14 * gz });
         });
         const labelPos = layoutLabels(labelItems, 1, obstacles);
         const halo = dark ? 'rgba(10,18,32,.85)' : 'rgba(255,255,255,.9)';
@@ -1346,19 +1406,19 @@
           const d = it.d, f = it.f;
           ctx.globalAlpha = 0.45 + 0.55 * d;
           if (f.reach) {
-            ctx.beginPath(); ctx.arc(it.x, it.y, 10 * (0.7 + 0.3 * d), 0, Math.PI * 2);
+            ctx.beginPath(); ctx.arc(it.x, it.y, 10 * (0.7 + 0.3 * d) * gz, 0, Math.PI * 2);
             ctx.strokeStyle = 'rgba(255,107,53,.9)'; ctx.lineWidth = 2; ctx.stroke();
           }
           if (f.shared) {
-            ctx.beginPath(); ctx.arc(it.x, it.y, 8.5 * (0.7 + 0.3 * d), 0, Math.PI * 2);
+            ctx.beginPath(); ctx.arc(it.x, it.y, 8.5 * (0.7 + 0.3 * d) * gz, 0, Math.PI * 2);
             ctx.strokeStyle = '#ff7a59'; ctx.lineWidth = 2; ctx.stroke();
           }
           if (f.secret) {
-            ctx.beginPath(); ctx.arc(it.x, it.y, 8.5 * (0.7 + 0.3 * d), 0, Math.PI * 2);
+            ctx.beginPath(); ctx.arc(it.x, it.y, 8.5 * (0.7 + 0.3 * d) * gz, 0, Math.PI * 2);
             ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 2;
             ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
           }
-          const rad = (f.start ? 5.2 : 3.6) * (0.65 + 0.35 * d);
+          const rad = (f.start ? 5.2 : 3.6) * (0.65 + 0.35 * d) * gz;
           ctx.beginPath(); ctx.arc(it.x, it.y, rad, 0, Math.PI * 2);
           ctx.fillStyle = f.reach ? '#ff6b35' : (dark ? '#f2ead9' : '#6b5442');
           ctx.fill();
@@ -1427,6 +1487,19 @@
         if (viewMode !== 'globe') { GLOBE.raf = 0; return; }
         // 不自动旋转：只有拖拽松手后的惯性会继续转一小会儿，随后自然停住
         let moving = false;
+        // 下钻/钻出的补间动画
+        if (GLOBE.anim && !GLOBE.drag) {
+          const a = GLOBE.anim;
+          let t = (performance.now() - a.t0) / a.ms;
+          if (t > 1) t = 1;
+          const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;   // easeInOutQuad
+          GLOBE.yaw = a.y0 + (a.y1 - a.y0) * e;
+          GLOBE.pitch = a.p0 + (a.p1 - a.p0) * e;
+          GLOBE.zoom = a.z0 * Math.pow(a.z1 / a.z0, e);
+          if (t >= 1) { GLOBE.anim = null; GLOBE.zoom = a.z1; }
+          updateZoomTag();
+          moving = true;
+        }
         if (!GLOBE.drag && Math.abs(GLOBE.vy) > 1e-4) {
           GLOBE.yaw += GLOBE.vy;
           GLOBE.vy *= 0.92;                 // 惯性衰减
@@ -1459,6 +1532,7 @@
         const cv = $('globe');
         if (!cv) return;
         cv.addEventListener('pointerdown', function (e) {
+          GLOBE.anim = null;                 // 手动拖拽立即打断下钻动画
           GLOBE.drag = true; GLOBE.moved = 0;
           GLOBE.lx = e.clientX; GLOBE.ly = e.clientY;
           cv.classList.add('dragging');
@@ -1479,13 +1553,28 @@
         };
         cv.addEventListener('pointerup', endDrag);
         cv.addEventListener('pointercancel', endDrag);
-        // 滚轮缩放（0.75x ~ 2.2x）
+        // 滚轮缩放（0.3x ~ 6x，与按钮同一区间）：以光标下的地面为锚点，
+        // 放大时该点自动滑向球心（越放越贴近当地），缩小时滑向边缘——即真正的下钻
         cv.addEventListener('wheel', function (e) {
           e.preventDefault();
-          setGlobeZoom((GLOBE.zoom || 1) * (e.deltaY < 0 ? 1.12 : 0.89));
+          const rect = cv.getBoundingClientRect();
+          setGlobeZoom((GLOBE.zoom || 1) * (e.deltaY < 0 ? 1.12 : 0.89),
+                       e.clientX - rect.left - GLOBE.cx,
+                       e.clientY - rect.top - GLOBE.cy);
         }, { passive: false });
-        // 双击复位缩放
-        cv.addEventListener('dblclick', function () { setGlobeZoom(1); });
+        // 双击：钻入光标所指之处（已钻入则钻出，回到全球视角）
+        cv.addEventListener('dblclick', function (e) {
+          const rect = cv.getBoundingClientRect();
+          const ax = e.clientX - rect.left - GLOBE.cx, ay = e.clientY - rect.top - GLOBE.cy;
+          const ll = globeUnproject(ax / (GLOBE.r || 1), ay / (GLOBE.r || 1));
+          const cur = GLOBE.zoom || 1;
+          if (!ll || cur >= 1.8) {           // 点在球外、或已经贴近：钻出
+            globeAnimTo(GLOBE.yaw, GLOBE.pitch, 1, 420);
+            toast('已退出下钻，回到全球视角');
+            return;
+          }
+          globeDrillTo(ll[0], ll[1], Math.min(6, Math.max(2.6, cur * 2.2)), 480);
+        });
         cv.addEventListener('click', function (e) {
           if (GLOBE.moved > 6) return;          // 拖动过就不当作点击
           const city = globeHitTest(e.clientX, e.clientY);
@@ -1651,11 +1740,14 @@
       }
 
       // ---------- 平面地图：缩放 / 平移 / 回到我的位置 ----------
+      // 缩放上限：64 倍已能看清城市间的连线细节；下限 = 整张地图（再小没有内容可看）
+      const FLAT_MAX_ZOOM = 64;
+
       function zoomLevel() { return VW / view.w; }
 
       function clampView(v) {
-        // 最小 = 整张地图；最大 = 放大 8 倍；且不允许把视野推到地图之外
-        v.w = Math.max(VW / 8, Math.min(VW, v.w));
+        // 最小 = 整张地图；最大 = 放大 64 倍；且不允许把视野推到地图之外
+        v.w = Math.max(VW / FLAT_MAX_ZOOM, Math.min(VW, v.w));
         v.h = v.w * VH / VW;
         v.x = Math.max(0, Math.min(VW - v.w, v.x));
         v.y = Math.max(0, Math.min(VH - v.h, v.y));
@@ -1663,7 +1755,7 @@
 
       function zoomAt(z, cx, cy) {
         /** 缩放到 z 倍；(cx, cy) 为焦点（SVG 坐标），不传则保持视野中心不动。 */
-        z = Math.max(1, Math.min(8, z));
+        z = Math.max(1, Math.min(FLAT_MAX_ZOOM, z));
         const nw = VW / z, nh = VH / z;
         const px = (cx == null ? view.x + view.w / 2 : cx);
         const py = (cy == null ? view.y + view.h / 2 : cy);
@@ -1683,8 +1775,24 @@
       }
 
       // 球面：与平面同一套按钮语义（放大 / 缩小 / 回到我），内部走 GLOBE.zoom
-      function setGlobeZoom(z) {
-        GLOBE.zoom = Math.max(0.75, Math.min(2.2, z));   // 与滚轮缩放同一区间
+      // 缩放区间 0.3 ~ 6：小到看全球轮廓，大到贴近城市
+      // ax / ay：锚点相对球心的像素偏移（滚轮时用光标位置）。给了就做焦点下钻——
+      // 让锚点处的地面在缩放后仍停在同一像素上，于是放大时它自动滑向球心，缩小时滑向边缘。
+      function setGlobeZoom(z, ax, ay) {
+        const cur = GLOBE.zoom || 1;
+        const next = Math.max(0.3, Math.min(6, z));
+        if (typeof ax === 'number' && typeof ay === 'number' && GLOBE.r > 0 &&
+            Math.abs(next - cur) > 1e-6) {
+          const ux = ax / GLOBE.r, uy = ay / GLOBE.r;
+          const ll = globeUnproject(ux, uy);
+          if (ll) {
+            const k = next / cur;
+            const f = globeFocus(ll[0], ll[1], ux / k, uy / k);
+            if (f) { GLOBE.yaw = f.yaw; GLOBE.pitch = Math.max(-1.2, Math.min(1.2, f.pitch)); }
+          }
+        }
+        GLOBE.anim = null;
+        GLOBE.zoom = next;
         GLOBE.dirty = true;
         updateZoomTag();
         renderGlobe();
@@ -1694,8 +1802,9 @@
         const city = (m && m.position) || currentStartCity() || (MAP && MAP.start);
         const g = MAP && MAP.geo && MAP.geo[city];
         if (!g) { toast('暂时无法定位'); return; }
-        GLOBE.yaw = g[0] * Math.PI / 180;
-        GLOBE.pitch = g[1] * Math.PI / 180;
+        // 平滑转到该城并顺带贴近一点（不打断玩家已有的下钻深度）
+        globeDrillTo(g[0] * Math.PI / 180, g[1] * Math.PI / 180,
+                     Math.max(GLOBE.zoom || 1, 1.6), 480);
         GLOBE.init = true;
         GLOBE.vy = 0;                 // 清掉惯性，避免刚对准就被甩走
         GLOBE.dirty = true;
