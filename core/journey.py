@@ -1,27 +1,32 @@
 # -*- coding: utf-8 -*-
-"""《山河之旅》游戏引擎：房间、回合、掷骰、移动、得分与胜负判定。
-线程安全：每个房间自带 RLock，调用方（server）在修改状态时需持有该锁。
+"""通用"旅游棋"引擎：房间、回合、掷骰、移动、得分与胜负判定。
+
+规则与《山河之旅》一致，地图由外部注入（core.gamemap.GameMap），
+因此同一套引擎可同时支撑《山河之旅》《世界之旅》等不同棋盘。
+
+线程安全：每个房间自带 RLock，调用方（网络层）在修改状态时需持有该锁。
 """
 import random
 import time
 import threading
-from map_data import (CITY_GEO, CITY_POINTS, ROUTES, COLORS, DICE_FACES,
-                      WILD, DICE_PER_TURN)
-
-TICKET_KEYS = list(COLORS.keys()) + [WILD]
-WIN_SCORE = 10
 
 
 class GameError(Exception):
     pass
 
 
-class GameRoom:
-    def __init__(self, room_id, password='', dice_count=None, timeout=30, ai_level='normal', max_players=4):
+class JourneyRoom:
+    def __init__(self, map_, room_id, password='', dice_count=None,
+                 timeout=30, ai_level='normal', max_players=4,
+                 win_score=None, steps_per_turn=1):
+        self.M = map_          # 注入的地图（城市/线路/配色/陆地轮廓）
         self.room_id = room_id
         self.password = password
+        # 可选规则（默认沿用正版：目标 10 分、每回合走 1 步）
+        self.win_score = int(win_score) if win_score else map_.WIN_SCORE
+        self.steps_per_turn = max(1, min(3, int(steps_per_turn or 1)))
         # 官方规则：每回合固定掷 2 颗骰子；允许通过参数覆盖，但至少 1 颗
-        self.dice_count = dice_count if (isinstance(dice_count, int) and dice_count >= 1) else DICE_PER_TURN
+        self.dice_count = dice_count if (isinstance(dice_count, int) and dice_count >= 1) else self.M.DICE_PER_TURN
         self.ai_level = ai_level   # easy | normal，机器人难度
         self.max_players = max(2, min(4, int(max_players)))  # 房间总人数上限（含机器人）
         self.timeout = max(10, min(120, int(timeout)))
@@ -43,12 +48,18 @@ class GameRoom:
         self.finish_order = []     # 依次达成目标的玩家 pid（游戏结束条件用）
         self.log = []
         self.lock = threading.RLock()
+        self.TICKET_KEYS = list(self.M.COLORS.keys()) + [self.M.WILD]
         self._build_adj()
+
+    @property
+    def steps_left(self):
+        """本回合还能走几步（走满后引擎会自动结束回合）。"""
+        return max(0, self.steps_per_turn - max(0, len(self.move_path) - 1))
 
     # ---------- 地图辅助 ----------
     def _build_adj(self):
-        self.adj = {c: [] for c in CITY_GEO}
-        for i, (a, b, color, cost) in enumerate(ROUTES):
+        self.adj = {c: [] for c in self.M.CITY_GEO}
+        for i, (a, b, color, cost) in enumerate(self.M.ROUTES):
             self.adj[a].append({'to': b, 'color': color, 'cost': cost, 'id': i})
             self.adj[b].append({'to': a, 'color': color, 'cost': cost, 'id': i})
 
@@ -58,7 +69,7 @@ class GameRoom:
     # ---------- 玩家管理 ----------
     def available_colors(self):
         used = {p['color'] for p in self.players.values() if p['color']}
-        return [c for c in COLORS if c not in used]
+        return [c for c in self.M.COLORS if c not in used]
 
     def join(self, pid, name, sid, bot=False):
         if pid in self.players:
@@ -72,7 +83,7 @@ class GameRoom:
         self.players[pid] = {
             'pid': pid, 'name': name, 'color': color, 'sid': sid,
             'position': '北京', 'score': 0, 'goal_done': False,
-            'secret': None, 'tickets': {k: 0 for k in TICKET_KEYS},
+            'secret': None, 'tickets': {k: 0 for k in self.TICKET_KEYS},
             'cards': [],               # 已收走的城市卡（公开信息）
             'connected': True, 'bot': bool(bot),
         }
@@ -110,14 +121,14 @@ class GameRoom:
             raise GameError('至少需要 2 名在线玩家')
         if self.state != 'lobby':
             raise GameError('游戏已经开始')
-        deck = [c for c in CITY_GEO if c != '北京']
+        deck = [c for c in self.M.CITY_GEO if c != '北京']
         random.shuffle(deck)
         self.deck = deck
         for p in self.players.values():
             p['position'] = '北京'
             p['score'] = 0
             p['goal_done'] = False
-            p['tickets'] = {k: 0 for k in TICKET_KEYS}
+            p['tickets'] = {k: 0 for k in self.TICKET_KEYS}
             p['cards'] = []
             p['secret'] = self.deck.pop()
         self.shared_cards = [self.deck.pop() for _ in range(min(3, len(self.deck)))]
@@ -137,11 +148,10 @@ class GameRoom:
         self.timer_deadline = time.time() + self.timeout
 
     # ---------- 掷骰子 ----------
-    @staticmethod
-    def _face_label(f):
-        if f == WILD:
+    def _face_label(self, f):
+        if f == self.M.WILD:
             return 'GO(万能)'
-        return COLORS[f]['name']
+        return self.M.COLORS[f]['name']
 
     def roll(self, pid):
         if self.state != 'playing':
@@ -150,11 +160,11 @@ class GameRoom:
             raise GameError('还没轮到你')
         if self.phase != 'roll':
             raise GameError('本回合已经掷过骰子')
-        results = [random.choice(DICE_FACES) for _ in range(self.dice_count)]
+        results = [random.choice(self.M.DICE_FACES) for _ in range(self.dice_count)]
         self.last_roll = results
         p = self.players[pid]
         for f in results:
-            p['tickets'][WILD if f == WILD else f] += 1
+            p['tickets'][self.M.WILD if f == self.M.WILD else f] += 1
         self.phase = 'move'
         self.log.append(f'{p["name"]} 掷出：' + '、'.join(self._face_label(f) for f in results))
 
@@ -163,7 +173,7 @@ class GameRoom:
         p = self.players[pid]
         for r in self.neighbors(p['position']):
             if r['to'] == neighbor:
-                have = p['tickets'][r['color']] + p['tickets'][WILD]
+                have = p['tickets'][r['color']] + p['tickets'][self.M.WILD]
                 return have >= r['cost']
         return False
 
@@ -172,7 +182,7 @@ class GameRoom:
         p = self.players[pid]
         out = []
         for r in self.neighbors(p['position']):
-            if p['tickets'][r['color']] + p['tickets'][WILD] >= r['cost']:
+            if p['tickets'][r['color']] + p['tickets'][self.M.WILD] >= r['cost']:
                 out.append({'to': r['to'], 'color': r['color'], 'cost': r['cost']})
         return out
 
@@ -196,20 +206,22 @@ class GameRoom:
         # 优先用真票、少消耗万能票
         routes.sort(key=lambda r: (r['cost'], max(0, r['cost'] - p['tickets'][r['color']])))
         route = routes[0]
-        if p['tickets'][route['color']] + p['tickets'][WILD] < route['cost']:
+        if p['tickets'][route['color']] + p['tickets'][self.M.WILD] < route['cost']:
             raise GameError('该路线车票不足')
         use_color = min(route['cost'], p['tickets'][route['color']])
         use_wild = route['cost'] - use_color
         p['tickets'][route['color']] -= use_color
-        p['tickets'][WILD] -= use_wild
+        p['tickets'][self.M.WILD] -= use_wild
         if not self.move_path:
             self.move_path = [p['position']]
         p['position'] = neighbor
         self.move_path.append(neighbor)
         self.log.append(
-            f'{p["name"]} 沿{COLORS[route["color"]]["name"]}色线路消耗 {route["cost"]} 张票，前往 {neighbor}')
-        # 官方规则：每回合只能移动一次，移动后立即结束本回合
-        self._advance()
+            f'{p["name"]} 沿{self.M.COLORS[route["color"]]["name"]}色线路消耗 {route["cost"]} 张票，前往 {neighbor}')
+        # 走满本回合允许的步数后，自动结算并结束回合
+        # （正版为每回合 1 步；世界之旅等开放棋盘可选更多步数）
+        if len(self.move_path) - 1 >= self.steps_per_turn:
+            self._advance()
 
     def _claims(self, p, path=None):
         city = p['position']
@@ -217,7 +229,7 @@ class GameRoom:
         # 官方规则：只有移动后停留的城市与桌面城市卡相同，才获得该城市卡上的分数
         if city in self.shared_cards:
             idx = self.shared_cards.index(city)
-            pts = CITY_POINTS[city]
+            pts = self.M.CITY_POINTS[city]
             p['score'] += pts
             p.setdefault('cards', []).append(city)
             self.log.append(f'{p["name"]} 获得城市卡 {city}，+{pts} 分！')
@@ -225,11 +237,11 @@ class GameRoom:
             self.shared_cards[idx] = self.deck.pop() if self.deck else None
         # 秘密目的地：只有【当前停留】在秘密目的地才算到达（途经不算）
         arrived = (city == p['secret'])
-        if arrived and p['score'] >= WIN_SCORE:
+        if arrived and p['score'] >= self.win_score:
             p['goal_done'] = True
             self.log.append(f'{p["name"]} 抵达秘密目的地 {city}！')
-        # 获胜条件（官方）：分数 ≥ WIN_SCORE 且 当前停留在秘密目的地，立即获胜并结束游戏
-        if self.state == 'playing' and p['score'] >= WIN_SCORE and arrived:
+        # 获胜条件（官方）：分数 ≥ self.win_score 且 当前停留在秘密目的地，立即获胜并结束游戏
+        if self.state == 'playing' and p['score'] >= self.win_score and arrived:
             self.state = 'finished'
             self.winner = p['pid']
             self.phase = 'done'
@@ -254,7 +266,7 @@ class GameRoom:
             return
         # 已达成目标（停在秘密目的地且分数达标）的玩家轮空，不再参与回合轮转
         done = {pid for pid, q in self.players.items()
-                if q['position'] == q['secret'] and q['score'] >= WIN_SCORE}
+                if q['position'] == q['secret'] and q['score'] >= self.win_score}
         pool = [pid for pid in conn if pid not in done] or conn
         idx = pool.index(self.current_pid) if self.current_pid in pool else -1
         self.current_pid = pool[(idx + 1) % len(pool)]
@@ -321,7 +333,7 @@ class GameRoom:
         moves = []
         if viewer_pid == self.current_pid and self.state == 'playing' and self.phase == 'move':
             moves = self.reachable_moves(viewer_pid)
-        shared = [{'city': c, 'points': CITY_POINTS.get(c, 0) if c else 0} for c in self.shared_cards]
+        shared = [{'city': c, 'points': self.M.CITY_POINTS.get(c, 0) if c else 0} for c in self.shared_cards]
         rem = 0
         if self.timer_deadline and self.state == 'playing':
             rem = max(0, int(self.timer_deadline - time.time()))
@@ -331,6 +343,9 @@ class GameRoom:
             'host_pid': self.host_pid,
             'dice_count': self.dice_count,
             'timeout': self.timeout,
+            'win_score': self.win_score,
+            'steps_per_turn': self.steps_per_turn,
+            'steps_left': self.steps_left,
             'players': players,
             'shared_cards': shared,
             'current_pid': self.current_pid,

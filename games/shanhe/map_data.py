@@ -192,6 +192,16 @@ ROUTES = [
     ('西宁', '拉萨', 'purple', 2),
 ]
 
+# 台湾岛 / 海南岛轮廓（大陆轮廓未覆盖，单独补上，避免这两处城市浮在海上）
+TAIWAN_ISLAND = [
+    (120.1, 23.0), (120.9, 21.9), (121.4, 22.6), (121.9, 24.5),
+    (121.6, 25.3), (120.9, 25.2), (120.1, 23.5),
+]
+HAINAN_ISLAND = [
+    (108.6, 19.9), (110.0, 20.1), (110.6, 19.9), (111.0, 19.6),
+    (110.5, 18.7), (109.5, 18.2), (108.7, 18.5),
+]
+
 # 中国轮廓近似边界点 (经度, 纬度)，顺时针，供前端绘制地图底图
 CHINA_BORDER = [
     (126.5, 53.3), (123.0, 53.5), (120.7, 53.0), (117.5, 49.5), (120.0, 47.5),
@@ -208,3 +218,22 @@ CHINA_BORDER = [
     (122.7, 37.4), (119.2, 37.5), (118.0, 39.0), (121.6, 38.9), (122.1, 39.1),
     (124.4, 40.0), (128.0, 41.9), (130.7, 42.9), (131.3, 45.0), (134.3, 48.4),
 ]
+
+
+def build_map():
+    """组装《山河之旅》棋盘（供 core.journey / core.ai / HTTP 接口使用）。"""
+    from core.gamemap import GameMap, china_projection
+    return GameMap(
+        name='山河之旅',
+        city_geo=CITY_GEO,
+        city_points=CITY_POINTS,
+        routes=ROUTES,
+        colors=COLORS,
+        wild=WILD,
+        dice_faces=DICE_FACES,
+        start_city='北京',
+        land=[CHINA_BORDER, TAIWAN_ISLAND, HAINAN_ISLAND],
+        dice_per_turn=DICE_PER_TURN,
+        win_score=10,
+        projection=china_projection,
+    )

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""《山河之旅》机器人 AI。
+"""通用"旅游棋"机器人 AI（地图由房间的 room.M 注入，因此与具体棋盘解耦）。
 
 策略核心（启发式，不做穷举）：
 1. 目标评估：公共城市卡（分值越高越想要）+ 自己的秘密目的地（必须到达，权重最高）。
@@ -13,32 +13,6 @@
 - easy  ：35% 概率随机走一步，偶尔错过最优解，适合儿童。
 """
 import random
-from collections import deque
-
-from map_data import CITY_GEO, CITY_POINTS, ROUTES, WILD
-
-# 忽略颜色的邻接表：(邻居, 颜色, 票数)
-_ADJ = {c: [] for c in CITY_GEO}
-for _a, _b, _color, _cost in ROUTES:
-    _ADJ[_a].append((_b, _color, _cost))
-    _ADJ[_b].append((_a, _color, _cost))
-
-
-def _bfs(start):
-    """从 start 出发，忽略颜色的最少段数距离。"""
-    dist = {start: 0}
-    q = deque([start])
-    while q:
-        n = q.popleft()
-        for m, _c, _w in _ADJ[n]:
-            if m not in dist:
-                dist[m] = dist[n] + 1
-                q.append(m)
-    return dist
-
-
-# 45 座城市，启动时一次性算好全源最短路，之后查表即可
-ALL_DIST = {c: _bfs(c) for c in CITY_GEO}
 
 
 def _affordable(room, pid, to_city):
@@ -47,7 +21,7 @@ def _affordable(room, pid, to_city):
     for r in room.neighbors(p['position']):
         if r['to'] != to_city:
             continue
-        if p['tickets'][r['color']] + p['tickets'][WILD] >= r['cost']:
+        if p['tickets'][r['color']] + p['tickets'][room.M.WILD] >= r['cost']:
             return r
     return None
 
@@ -58,14 +32,15 @@ def targets_for(room, pid):
     tg = {}
     for c in room.shared_cards:
         if c:
-            tg[c] = 1.0 + CITY_POINTS.get(c, 1) * 0.45   # 分值越高越吸引人
+            tg[c] = 1.0 + room.M.CITY_POINTS.get(c, 1) * 0.45   # 分值越高越吸引人
     if p['secret'] and not p['goal_done']:
-        tg[p['secret']] = tg.get(p['secret'], 0.0) + 2.2  # 目的地是获胜前提
+        tg[p['secret']] = tg.get(p['secret'], 0.0) + 2.2        # 目的地是获胜前提
     return tg
 
 
 def next_step(room, pid, level='normal'):
     """返回下一步要去的城市名；None 表示本回合不再走。"""
+    M = room.M
     p = room.players[pid]
     here = p['position']
     tg = targets_for(room, pid)
@@ -78,7 +53,7 @@ def next_step(room, pid, level='normal'):
     # 挑性价比最高的目标：权重高、距离近
     best = None
     for city, w in tg.items():
-        d = ALL_DIST[here].get(city)
+        d = M.ALL_DIST[here].get(city)
         if not d:
             continue
         s = w / (d ** 1.4)
@@ -91,12 +66,12 @@ def next_step(room, pid, level='normal'):
     options = []
     # 不走回头路（除非那一步正好踩上目标），防止在两个城市间来回晃
     prev = room.move_path[-1] if len(room.move_path) >= 2 else None
-    for m, _color, _cost in _ADJ[here]:
+    for m, _color, _cost in M.ADJ[here]:
         if prev and m == prev and m != target:
             continue
         if not _affordable(room, pid, m):
             continue
-        nd = ALL_DIST[m].get(target, 99)
+        nd = M.ALL_DIST[m].get(target, 99)
         options.append((cur_d - nd, _cost, m))   # 缩短的距离、花费、城市
     if not options:
         return None

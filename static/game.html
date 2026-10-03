@@ -95,6 +95,12 @@
       background: var(--panel); border-radius: 20px; padding: 16px; box-shadow: var(--shadow);
     }
     .board-wrap svg { background: #e3f1fb; border-radius: 14px; display: block; width: 100%; max-width: 1500px; margin: 0 auto; }
+    /* 球面视图：Canvas 绘制的可旋转地球（零依赖，离线可用） */
+    .globe { display: block; width: 100%; aspect-ratio: 1000 / 720; max-width: 1500px;
+      margin: 0 auto; border-radius: 14px; background: #cfe9f4; cursor: grab; touch-action: none; }
+    .globe.dragging { cursor: grabbing; }
+    .globe.hidden { display: none; }
+    .board.dark + .globe { background: #0f1d33; }
     .land { fill: #eef6ea; stroke: #a9c0a4; stroke-width: 1.5; stroke-linejoin: round; }
     .route { stroke-width: 4; opacity: .5; }
     .route.reach { opacity: 1; stroke-width: 6; stroke-dasharray: 2 6; }
@@ -227,8 +233,8 @@
   <!-- 大厅 / 等待室 -->
   <main id="lobby" class="screen">
     <div class="card lobby-card">
-      <h1>欢迎来到《山河之旅》</h1>
-      <p class="subtitle">2-4 人 · 中国地理启蒙桌游 · 从北京出发，收集城市卡！</p>
+      <h1 id="gameTitle">欢迎来到《山河之旅》</h1>
+      <p class="subtitle" id="gameSubtitle">2-4 人 · 地理启蒙桌游</p>
 
       <label>服务器地址（留空 = 当前页面地址）
         <input id="serverInput" placeholder="例如：http://localhost:5000" />
@@ -286,6 +292,16 @@
         </select>
       </label>
 
+      <!-- 开放规则：仅当该棋盘声明了可选项时才显示 -->
+      <div class="row hidden" id="ruleRow">
+        <label>目标分
+          <select id="winScoreSelect"></select>
+        </label>
+        <label>每回合步数
+          <select id="stepsSelect"></select>
+        </label>
+      </div>
+
       <div class="btn-group">
         <button id="createBtn" class="btn primary">创建房间</button>
       </div>
@@ -330,12 +346,14 @@
       <div class="board-head">
         <span id="turnInfo" class="turn-info">准备中…</span>
         <span class="head-right">
+          <button id="viewBtn" class="btn ghost small hidden" title="切换平面地图 / 球面地球">🗺 平面</button>
           <button id="themeBtn" class="btn ghost small" title="切换主题（亮色 / 暗色）">🌞 亮色</button>
           <span id="timerInfo" class="timer hidden"></span>
         </span>
       </div>
       <div class="board-area">
         <div id="board" class="board"></div>
+        <canvas id="globe" class="globe hidden"></canvas>
         <div id="diceArea" class="dice-area"></div>
       </div>
       <div id="moveHint" class="move-hint hidden"></div>
@@ -386,13 +404,18 @@
   <script>
     /* 应用逻辑（内联，避免代理拦截外部 js/css） */
     function startApp() {
-      const STORE_KEY = 'shanhe_trip';
-      const SERVER_KEY = 'shanhe_trip_server';
+      // 当前棋种由路径 /g/<game_id>/ 决定：同一套客户端服务所有棋
+      const GAME_ID = (location.pathname.match(/^\/g\/([A-Za-z0-9_-]+)/) || [null, 'shanhe'])[1];
+      const STORE_KEY = GAME_ID + '_trip';
+      const SERVER_KEY = GAME_ID + '_trip_server';
+      const VIEW_KEY = GAME_ID + '_view';
       let socket = null;
       let MAP = null;
       let ADJ = {};
-      let POS = {};          // 城市投影坐标 {name:{x,y}}
-      let BORDER_PATH = '';  // 中国轮廓 SVG 路径
+      let POS = {};          // 城市投影坐标 {name:{x,y}}（平面视图用）
+      let LAND_PATHS = [];   // 陆地轮廓 SVG 路径（平面视图，可含多个多边形）
+      let GAME_SPEC = null;  // 该棋元信息：可用视图、可选规则
+      let viewMode = 'flat'; // flat=平面地图 | globe=可旋转球面
       let state = null;
       let myPid = null;
       let myRoom = null;
@@ -446,20 +469,76 @@
         const t = setTimeout(function () { ctrl.abort(); }, 5000);
         let res;
         try {
-          res = await fetch(base + '/api/map', { signal: ctrl.signal });
+          // 每个棋种有自己的地图接口（服务端已算好投影，前端只管画）
+          res = await fetch(base + '/g/' + GAME_ID + '/api/map', { signal: ctrl.signal });
         } finally {
           clearTimeout(t);
         }
         if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + (res.statusText || ''));
         MAP = await res.json();
-        ADJ = {};
-        Object.keys(MAP.cities).forEach((c) => (ADJ[c] = []));
+        ADJ = {}; POS = {};
+        MAP.cities.forEach(function (c) {
+          ADJ[c.name] = [];
+          POS[c.name] = { x: c.x, y: c.y };   // 服务端已投影好的画布坐标
+        });
         MAP.routes.forEach(function (r) {
           const a = r[0], b = r[1], color = r[2], cost = r[3];
           ADJ[a].push({ to: b, color: color, cost: cost });
           ADJ[b].push({ to: a, color: color, cost: cost });
         });
-        computeProjection();
+        // 陆地轮廓（可能由多个多边形组成：大陆 + 岛屿）
+        LAND_PATHS = (MAP.land || []).map(function (poly) {
+          return poly.map(function (p, i) {
+            return (i ? 'L' : 'M') + p[0] + ' ' + p[1];
+          }).join(' ') + ' Z';
+        });
+        placeLabels();
+        buildGlobeDots();
+      }
+
+      // 载入该棋的元信息（名称 / 可用视图 / 可选规则）
+      async function loadGameSpec() {
+        try {
+          const res = await fetch(serverBase() + '/api/games');
+          if (!res.ok) return;
+          const data = await res.json();
+          GAME_SPEC = (data.games || []).find((g) => g.id === GAME_ID) || null;
+        } catch (e) { /* 元信息拿不到时按默认（平面视图、默认规则）继续 */ }
+        applyGameSpec();
+      }
+
+      function applyGameSpec() {
+        if (!GAME_SPEC) return;
+        const t = $('gameTitle'), s = $('gameSubtitle');
+        if (t) t.textContent = '欢迎来到《' + GAME_SPEC.name + '》';
+        if (s) s.textContent = (GAME_SPEC.tags || []).join(' · ') + ' · ' + GAME_SPEC.desc;
+        document.title = GAME_SPEC.name;
+        // 支持球面的棋盘才显示切换按钮
+        const views = GAME_SPEC.views || ['flat'];
+        const vb = $('viewBtn');
+        if (vb) {
+          if (views.indexOf('globe') >= 0) vb.classList.remove('hidden');
+          else { vb.classList.add('hidden'); viewMode = 'flat'; }
+        }
+        // 开放规则（目标分 / 每回合步数）
+        const opts = GAME_SPEC.options || {};
+        const row = $('ruleRow');
+        const fill = function (sel, values) {
+          if (!values || !values.length) return false;
+          sel.innerHTML = values.map(function (v, i) {
+            return '<option value="' + v + '"' + (i === 0 ? ' selected' : '') + '>' + v + '</option>';
+          }).join('');
+          return true;
+        };
+        let shown = false;
+        if (row) {
+          const a = fill($('winScoreSelect'), opts.win_score);
+          const b = fill($('stepsSelect'), opts.steps_per_turn);
+          shown = a || b;
+          row.classList.toggle('hidden', !shown);
+          if (!a) row.querySelector('#winScoreSelect').closest('label').classList.add('hidden');
+          if (!b) row.querySelector('#stepsSelect').closest('label').classList.add('hidden');
+        }
       }
 
       // 城市名标签避让：为每座城市挑一个不与已有标签重叠的位置
@@ -502,32 +581,264 @@
         });
       }
 
-      // 把经纬度等距投影到 1000x720 画布，并生成中国轮廓路径
-      function computeProjection() {
-        const geo = MAP.geo, border = MAP.border;
-        const W = 1000, H = 720, pad = 55;
-        const k = Math.cos(35 * Math.PI / 180);
-        const raw = (lon, lat) => [(lon - 71) * k, (54 - lat)];
-        const pts = [];
-        Object.keys(geo).forEach((c) => pts.push(raw(geo[c][0], geo[c][1])));
-        border.forEach((p) => pts.push(raw(p[0], p[1])));
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        pts.forEach((p) => {
-          minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
-          minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+      // ---------- 球面视图：Canvas 2D 正交投影（零依赖、可拖拽旋转）----------
+      // 说明：不引 three.js / d3 是为了离线可用（CDN 拉不到时会白屏），
+      // 而正交投影 + 点阵大陆 + 大圆弧航线已足够呈现立体地球。
+      const GLOBE = { yaw: 2.0, pitch: 0.4, drag: false, moved: 0, lx: 0, ly: 0,
+                      auto: true, dots: [], raf: 0, cx: 0, cy: 0, r: 0, init: false };
+
+      // 初始视角对准出发城市：可证明 yaw=经度、pitch=纬度 时该点正好落在球心
+      function centerGlobeOn(city) {
+        if (GLOBE.init || !MAP || !MAP.geo || !city || !MAP.geo[city]) return;
+        const g0 = MAP.geo[city];
+        GLOBE.yaw = g0[0] * Math.PI / 180;
+        GLOBE.pitch = g0[1] * Math.PI / 180;
+        GLOBE.init = true;
+      }
+
+      function lonLatVec(lon, lat) {
+        const a = lat * Math.PI / 180, o = lon * Math.PI / 180;
+        return [Math.cos(a) * Math.sin(o), Math.sin(a), Math.cos(a) * Math.cos(o)];
+      }
+      function rotateVec(v, yaw, pitch) {
+        const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const x = v[0] * cy - v[2] * sy, z0 = v[0] * sy + v[2] * cy, y = v[1];
+        const cp = Math.cos(pitch), sp = Math.sin(pitch);
+        return [x, y * cp - z0 * sp, y * sp + z0 * cp];
+      }
+      function projectVec(lon, lat) {
+        const v = rotateVec(lonLatVec(lon, lat), GLOBE.yaw, GLOBE.pitch);
+        return { x: v[0], y: -v[1], z: v[2] };   // 屏幕 y 轴向下
+      }
+      function pointInPoly(x, y, poly) {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+          if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+        }
+        return inside;
+      }
+      // 预计算陆地点阵：经纬度固定，旋转时只需重新投影，省去每帧的多边形裁剪
+      function buildGlobeDots() {
+        if (!MAP || GLOBE.dots.length) return;
+        centerGlobeOn(MAP.start);
+        const polys = MAP.land_geo || [];
+        if (!polys.length) return;
+        const box = polys.map(function (p) {
+          let a = 180, b = -180, c = 90, d = -90;
+          p.forEach(function (q) {
+            a = Math.min(a, q[0]); b = Math.max(b, q[0]);
+            c = Math.min(c, q[1]); d = Math.max(d, q[1]);
+          });
+          return [a, b, c, d];
         });
-        const s = Math.min((W - 2 * pad) / (maxX - minX), (H - 2 * pad) / (maxY - minY));
-        const toXY = (lon, lat) => {
-          const r = raw(lon, lat);
-          return { x: pad + (r[0] - minX) * s, y: pad + (r[1] - minY) * s };
+        for (let lat = -58; lat <= 78; lat += 2) {
+          // 高纬度处经度方向按比例稀疏，避免极点附近点阵过密（保持视觉均匀）
+          const stepLon = 2 / Math.max(0.15, Math.cos(lat * Math.PI / 180));
+          for (let lon = -180; lon < 180; lon += stepLon) {
+            for (let i = 0; i < polys.length; i++) {
+              const bx = box[i];
+              if (lon < bx[0] || lon > bx[1] || lat < bx[2] || lat > bx[3]) continue;
+              if (pointInPoly(lon, lat, polys[i])) { GLOBE.dots.push([lon, lat]); break; }
+            }
+          }
+        }
+      }
+      // 大圆航线采样（球面最短路径）
+      function greatCircle(a, b, n) {
+        const va = lonLatVec(a[0], a[1]), vb = lonLatVec(b[0], b[1]);
+        let d = va[0] * vb[0] + va[1] * vb[1] + va[2] * vb[2];
+        d = Math.max(-1, Math.min(1, d));
+        const om = Math.acos(d), so = Math.sin(om), out = [];
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          let s1, s2;
+          if (so < 1e-6) { s1 = 1 - t; s2 = t; }
+          else { s1 = Math.sin((1 - t) * om) / so; s2 = Math.sin(t * om) / so; }
+          out.push([s1 * va[0] + s2 * vb[0], s1 * va[1] + s2 * vb[1], s1 * va[2] + s2 * vb[2]]);
+        }
+        return out;
+      }
+      // 只画朝向观察者的部分（z>0），自动处理地平线遮挡
+      function strokePath3D(ctx, cx, cy, R, pts3) {
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < pts3.length; i++) {
+          const v = rotateVec(pts3[i], GLOBE.yaw, GLOBE.pitch);
+          if (v[2] <= 0) { started = false; continue; }
+          const x = cx + v[0] * R, y = cy - v[1] * R;
+          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      function drawCurve(ctx, cx, cy, R, fn) {
+        const pts = [];
+        for (let i = 0; i <= 48; i++) pts.push(fn(i / 48));
+        strokePath3D(ctx, cx, cy, R, pts.map(function (p) {
+          return lonLatVec(p.lon, p.lat);
+        }));
+      }
+
+      function renderGlobe() {
+        const cv = $('globe');
+        if (!cv || !MAP) return;
+        const dpr = window.devicePixelRatio || 1;
+        const w = cv.clientWidth || 900, h = cv.clientHeight || 648;
+        if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+          cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+        }
+        const ctx = cv.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+        const cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.43;
+        GLOBE.cx = cx; GLOBE.cy = cy; GLOBE.r = R;
+        const dark = $('board').classList.contains('dark');
+
+        // 海洋球体：径向渐变模拟光照与明暗过渡
+        const g = ctx.createRadialGradient(cx - R * 0.35, cy - R * 0.4, R * 0.05, cx, cy, R * 1.05);
+        g.addColorStop(0, dark ? '#24486b' : '#eaf7fd');
+        g.addColorStop(0.55, dark ? '#16304c' : '#bfe3f4');
+        g.addColorStop(1, dark ? '#0a1728' : '#8cc5e0');
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+        ctx.fillStyle = g; ctx.fill();
+        ctx.strokeStyle = dark ? 'rgba(120,170,220,.45)' : 'rgba(80,130,160,.55)';
+        ctx.lineWidth = 1.5; ctx.stroke();
+
+        // 经纬网（增强球体感）
+        ctx.strokeStyle = dark ? 'rgba(150,195,235,.20)' : 'rgba(255,255,255,.55)';
+        ctx.lineWidth = 1;
+        for (let lat = -60; lat <= 60; lat += 30) {
+          (function (la) {
+            drawCurve(ctx, cx, cy, R, function (t) { return { lon: -180 + t * 360, lat: la }; });
+          })(lat);
+        }
+        for (let lon = -180; lon < 180; lon += 30) {
+          (function (lo) {
+            drawCurve(ctx, cx, cy, R, function (t) { return { lon: lo, lat: -90 + t * 180 }; });
+          })(lon);
+        }
+
+        // 陆地点阵
+        ctx.fillStyle = dark ? '#4c7f57' : '#84c06d';
+        const dr = Math.max(1, R / 200);
+        for (let i = 0; i < GLOBE.dots.length; i++) {
+          const p = projectVec(GLOBE.dots[i][0], GLOBE.dots[i][1]);
+          if (p.z <= 0) continue;
+          ctx.fillRect(cx + p.x * R - dr, cy + p.y * R - dr, dr * 2, dr * 2);
+        }
+
+        // 航线（大圆弧）
+        const moves = (state && state.moves) || [];
+        const reach = {};
+        moves.forEach(function (m) { reach[m.to] = true; });
+        (MAP.routes || []).forEach(function (r) {
+          const ga = MAP.geo[r[0]], gb = MAP.geo[r[1]];
+          if (!ga || !gb) return;
+          const hot = !!reach[r[0]] || !!reach[r[1]];
+          ctx.strokeStyle = (MAP.colors[r[2]] || {}).hex || '#888';
+          ctx.globalAlpha = hot ? 0.95 : 0.3;
+          ctx.lineWidth = hot ? 3.2 : 1.6;
+          strokePath3D(ctx, cx, cy, R, greatCircle(ga, gb, 24));
+        });
+        ctx.globalAlpha = 1;
+
+        // 城市与标签
+        ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        Object.keys(MAP.geo).forEach(function (name) {
+          const gg = MAP.geo[name];
+          const p = projectVec(gg[0], gg[1]);
+          if (p.z <= 0) return;
+          const x = cx + p.x * R, y = cy + p.y * R;
+          const hot = !!reach[name];
+          if (hot) {
+            ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,107,53,.9)'; ctx.lineWidth = 2; ctx.stroke();
+          }
+          ctx.beginPath(); ctx.arc(x, y, hot ? 5 : 3.6, 0, Math.PI * 2);
+          ctx.fillStyle = hot ? '#ff6b35' : (dark ? '#f2ead9' : '#6b5442');
+          ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; ctx.stroke();
+          ctx.fillStyle = dark ? '#e8eef7' : '#243447';
+          ctx.fillText(name, x + 7, y + 4);
+        });
+
+        // 当前所在城市高亮圈
+        const mine = me();
+        if (mine && mine.position && MAP.geo[mine.position]) {
+          const gg = MAP.geo[mine.position];
+          const p = projectVec(gg[0], gg[1]);
+          if (p.z > 0) {
+            ctx.beginPath(); ctx.arc(cx + p.x * R, cy + p.y * R, 9, 0, Math.PI * 2);
+            ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 3; ctx.stroke();
+          }
+        }
+      }
+
+      function globeLoop() {
+        if (viewMode !== 'globe') { GLOBE.raf = 0; return; }
+        if (GLOBE.auto && !GLOBE.drag) GLOBE.yaw += 0.0022;
+        renderGlobe();
+        GLOBE.raf = requestAnimationFrame(globeLoop);
+      }
+      function startGlobeLoop() {
+        if (!GLOBE.raf) GLOBE.raf = requestAnimationFrame(globeLoop);
+      }
+      function globeHitTest(clientX, clientY) {
+        const cv = $('globe');
+        if (!cv || !MAP) return null;
+        const rect = cv.getBoundingClientRect();
+        const x = clientX - rect.left, y = clientY - rect.top;
+        let best = null, bd = 1e9;
+        Object.keys(MAP.geo).forEach(function (name) {
+          const gg = MAP.geo[name];
+          const p = projectVec(gg[0], gg[1]);
+          if (p.z <= 0) return;
+          const px = GLOBE.cx + p.x * GLOBE.r, py = GLOBE.cy + p.y * GLOBE.r;
+          const d = Math.sqrt((px - x) * (px - x) + (py - y) * (py - y));
+          if (d < bd) { bd = d; best = name; }
+        });
+        return bd <= 16 ? best : null;
+      }
+      function initGlobeInteractions() {
+        const cv = $('globe');
+        if (!cv) return;
+        cv.addEventListener('pointerdown', function (e) {
+          GLOBE.drag = true; GLOBE.moved = 0;
+          GLOBE.lx = e.clientX; GLOBE.ly = e.clientY;
+          cv.classList.add('dragging');
+          try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+        });
+        cv.addEventListener('pointermove', function (e) {
+          if (!GLOBE.drag) return;
+          const dx = e.clientX - GLOBE.lx, dy = e.clientY - GLOBE.ly;
+          GLOBE.lx = e.clientX; GLOBE.ly = e.clientY;
+          GLOBE.moved += Math.abs(dx) + Math.abs(dy);
+          GLOBE.yaw += dx * 0.006;
+          GLOBE.pitch = Math.max(-1.2, Math.min(1.2, GLOBE.pitch + dy * 0.006));
+        });
+        const endDrag = function () {
+          GLOBE.drag = false; cv.classList.remove('dragging');
         };
-        POS = {};
-        Object.keys(geo).forEach((c) => (POS[c] = toXY(geo[c][0], geo[c][1])));
-        placeLabels();
-        BORDER_PATH = border.map(function (p, i) {
-          const q = toXY(p[0], p[1]);
-          return (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1);
-        }).join(' ') + ' Z';
+        cv.addEventListener('pointerup', endDrag);
+        cv.addEventListener('pointercancel', endDrag);
+        cv.addEventListener('click', function (e) {
+          if (GLOBE.moved > 6) return;          // 拖动过就不当作点击
+          const city = globeHitTest(e.clientX, e.clientY);
+          if (!city || !state) return;
+          const can = (state.moves || []).some(function (m) { return m.to === city; });
+          if (can) socket.emit('move', { room_id: state.room_id, player_id: myPid, neighbor: city });
+        });
+      }
+      function applyView() {
+        const isGlobe = viewMode === 'globe';
+        const cv = $('globe'), bd = $('board'), vb = $('viewBtn');
+        if (cv) cv.classList.toggle('hidden', !isGlobe);
+        if (bd) bd.classList.toggle('hidden', isGlobe);
+        if (vb) vb.textContent = isGlobe ? '🌍 球面' : '🗺 平面';
+        try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) {}
+        if (isGlobe) { buildGlobeDots(); startGlobeLoop(); }
+        else if (state) { render(); }
       }
 
       function renderBoard() {
@@ -621,7 +932,9 @@
           pathSvg = '<polyline class="move-path" points="' + pts + '" />';
         }
 
-        const landSvg = '<path class="land" d="' + BORDER_PATH + '" />';
+        const landSvg = LAND_PATHS.map(function (d) {
+          return '<path class="land" d="' + d + '" />';
+        }).join('');
         board.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">' +
           landSvg + routesSvg + pathSvg + citiesSvg + pawnsSvg + '</svg>';
 
@@ -754,8 +1067,10 @@
         const hint = $('moveHint');
         if (isMyTurn && state.phase === 'move') {
           const n = (state.moves || []).length;
+          const multi = (state.steps_per_turn || 1) > 1;
           hint.textContent = n
-            ? '🖱 点击高亮城市走一步（走完自动结束本回合）'
+            ? (multi ? '🖱 点击高亮城市走一步（本回合还能走 ' + (state.steps_left || 0) + ' 步）'
+                     : '🖱 点击高亮城市走一步（走完自动结束本回合）')
             : '🚫 没有可走的线路了，点“结束回合”继续';
           hint.classList.remove('hidden');
         } else {
@@ -765,7 +1080,8 @@
 
       function render() {
         if (!state) return;
-        renderBoard();
+        // 球面视图由 Canvas 渲染（自带动画循环），平面视图走 SVG
+        if (viewMode === 'globe') renderGlobe(); else renderBoard();
         renderSidebar();
         renderControls();
       }
@@ -787,7 +1103,8 @@
         const base = serverBase();
         // 强制 polling：部分代理环境会破坏 WebSocket 升级（Bad HTTP/0.9 request type）
         const opts = { transports: ['polling'] };
-        socket = base ? io(base, opts) : io(opts);
+        // 每款棋一个 Socket.IO 命名空间，房间号互不干扰
+        socket = base ? io(base + '/' + GAME_ID, opts) : io('/' + GAME_ID, opts);
         socket.on('connect', function () {
           connBadge.classList.remove('bad'); connBadge.classList.add('good');
           connBadge.textContent = '● 已连接服务器';
@@ -876,13 +1193,21 @@
         if (!(await ensureMap())) return;
         saveBase();
         const customRid = $('roomIdInput').value.trim();
-        socket.emit('create_room', {
+        const payload = {
           name: name, password: $('createPwdInput').value, room_id: customRid,
           dice_count: 2, ai_level: $('aiSelect').value,
           timeout: parseInt($('timeoutSelect').value, 10),
           max_players: parseInt($('maxPlayersSelect').value, 10),
           bot_count: parseInt($('botCountSelect').value, 10)
-        });
+        };
+        // 开放规则：仅当该棋盘声明了可选项时才带上（如世界之旅的目标分/步数）
+        const ruleRow = $('ruleRow');
+        if (ruleRow && !ruleRow.classList.contains('hidden')) {
+          const ws = $('winScoreSelect'), st = $('stepsSelect');
+          if (ws && ws.value) payload.win_score = parseInt(ws.value, 10);
+          if (st && st.value) payload.steps_per_turn = parseInt(st.value, 10);
+        }
+        socket.emit('create_room', payload);
       });
 
       // 加入房间（房间号来自大厅列表点击；需要密码时由弹框提供）
@@ -937,10 +1262,17 @@
         $('board').classList.toggle('dark', themeDark);
         $('themeBtn').textContent = themeDark ? '🌙 暗色' : '🌞 亮色';
         try { localStorage.setItem(THEME_KEY, themeDark ? 'dark' : 'light'); } catch (e) {}
+        if (viewMode === 'globe') renderGlobe();   // 球面配色随主题重绘
       }
       $('themeBtn').addEventListener('click', function () { themeDark = !themeDark; applyTheme(); });
       try { themeDark = localStorage.getItem(THEME_KEY) === 'dark'; } catch (e) {}
-      applyTheme();
+
+      // 视图切换：平面地图 ↔ 球面地球（仅支持球面的棋盘才显示该按钮）
+      $('viewBtn').addEventListener('click', function () {
+        viewMode = (viewMode === 'globe') ? 'flat' : 'globe';
+        applyView();
+      });
+      try { if (localStorage.getItem(VIEW_KEY) === 'globe') viewMode = 'globe'; } catch (e) {}
 
       (async function boot() {
         try {
@@ -953,7 +1285,11 @@
           lobbyMsg.textContent = '加载地图失败：' + e.message + '。请在上方"服务器地址"填写后端直连地址（如 http://localhost:5000）后重试。';
           lobbyMsg.classList.remove('hidden');
         }
+        await loadGameSpec();   // 元信息决定可用视图与可选规则
         initSocket();
+        initGlobeInteractions();
+        applyView();
+        applyTheme();
         startTimerTicker();
         loadRooms();
         setInterval(loadRooms, 3000);
@@ -973,7 +1309,7 @@
       if (!box || document.getElementById('lobby').classList.contains('hidden')) return;
       let list = null;
       try {
-        const res = await fetch(serverBase() + '/api/rooms');
+        const res = await fetch(serverBase() + '/api/rooms/' + GAME_ID);
         if (res.ok) list = (await res.json()).rooms;
       } catch (e) {}
       if (!list) { box.innerHTML = '<div class="room-empty">房间列表加载失败（请检查后端）</div>'; return; }

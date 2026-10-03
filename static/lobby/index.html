@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>儿童棋牌大厅</title>
+<style>
+  :root {
+    --bg: #0d1b2e;
+    --panel: rgba(255, 255, 255, .06);
+    --card: #16263f;
+    --accent: #ff6b35;
+    --accent2: #ffb703;
+    --text: #eaf2fb;
+    --muted: #9db3cc;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--text);
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1d3a5f 0%, transparent 60%),
+                radial-gradient(900px 500px at 90% 0%, #2a2145 0%, transparent 55%),
+                var(--bg);
+  }
+  header.banner {
+    padding: 28px 24px 18px; text-align: center;
+    background: linear-gradient(180deg, rgba(255,107,53,.16), transparent);
+  }
+  header.banner h1 {
+    margin: 0; font-size: 30px; letter-spacing: 2px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  header.banner p { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 8px 20px 60px; }
+
+  .tabs { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 18px 0 22px; }
+  .tab {
+    padding: 9px 20px; border-radius: 999px; cursor: pointer; user-select: none;
+    background: var(--panel); border: 1px solid rgba(255,255,255,.12);
+    color: var(--muted); font-weight: 700; font-size: 15px; transition: .18s;
+  }
+  .tab:hover { color: var(--text); transform: translateY(-1px); }
+  .tab.active {
+    color: #fff; border-color: transparent;
+    background: linear-gradient(135deg, var(--accent), #ff8f5e);
+    box-shadow: 0 6px 18px rgba(255, 107, 53, .35);
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--card); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 16px; padding: 18px; box-shadow: var(--shadow);
+    transition: transform .18s, border-color .18s; position: relative; overflow: hidden;
+  }
+  .card:hover { transform: translateY(-4px); border-color: rgba(255,107,53,.55); }
+  .card .icon { font-size: 40px; line-height: 1; }
+  .card h3 { margin: 12px 0 6px; font-size: 20px; }
+  .card .desc { color: var(--muted); font-size: 13px; line-height: 1.6; min-height: 42px; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 14px; }
+  .tag {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    background: rgba(255,255,255,.08); color: var(--muted);
+  }
+  .meta { font-size: 12px; color: #7d93ad; margin-bottom: 12px; }
+  .play {
+    display: inline-block; width: 100%; text-align: center; text-decoration: none;
+    padding: 10px 0; border-radius: 10px; font-weight: 800; color: #fff;
+    background: linear-gradient(135deg, var(--accent), #ff8f5e);
+    box-shadow: 0 6px 16px rgba(255,107,53,.3);
+  }
+  .play:hover { filter: brightness(1.06); }
+  .soon { opacity: .55; pointer-events: none; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+  footer { text-align: center; color: #5f7590; font-size: 12px; padding: 10px 0 30px; }
+</style>
+</head>
+<body>
+  <header class="banner">
+    <h1>🎲 儿童棋牌大厅</h1>
+    <p>和爸爸妈妈、小伙伴一起，边玩边学</p>
+  </header>
+
+  <div class="wrap">
+    <div class="tabs" id="tabs"></div>
+    <div class="grid" id="grid"><div class="empty">加载中…</div></div>
+  </div>
+
+  <footer>局域网内多人联机 · 支持电脑与手机浏览器</footer>
+
+<script>
+  const BASE = (location.origin && location.origin !== 'null') ? location.origin : '';
+  let CATS = [];
+  let active = null;
+
+  function cardHtml(g) {
+    const tags = (g.tags || []).map(function (t) { return '<span class="tag">' + t + '</span>'; }).join('');
+    return '<div class="card">' +
+      '<div class="icon">' + (g.icon || '🎲') + '</div>' +
+      '<h3>' + g.name + '</h3>' +
+      '<div class="desc">' + (g.desc || '') + '</div>' +
+      '<div class="tags">' + tags + '</div>' +
+      '<div class="meta">' + g.cities + ' 座城市 · ' + g.routes + ' 条线路 · 最多 ' + g.max_players + ' 人</div>' +
+      '<a class="play" href="/g/' + g.id + '/">开始游戏 ›</a>' +
+      '</div>';
+  }
+
+  function renderTabs() {
+    const box = document.getElementById('tabs');
+    box.innerHTML = CATS.map(function (c) {
+      return '<div class="tab' + (c.name === active ? ' active' : '') + '" data-cat="' + c.name + '">' +
+             c.name + '（' + c.games.length + '）</div>';
+    }).join('');
+    box.querySelectorAll('.tab').forEach(function (el) {
+      el.addEventListener('click', function () { active = el.dataset.cat; renderTabs(); renderGrid(); });
+    });
+  }
+
+  function renderGrid() {
+    const grid = document.getElementById('grid');
+    const cat = CATS.find(function (c) { return c.name === active; });
+    if (!cat || !cat.games.length) { grid.innerHTML = '<div class="empty">该分类暂无游戏</div>'; return; }
+    grid.innerHTML = cat.games.map(cardHtml).join('');
+  }
+
+  (async function boot() {
+    try {
+      const res = await fetch(BASE + '/api/games');
+      const data = await res.json();
+      CATS = data.categories || [];
+      active = CATS.length ? CATS[0].name : null;
+      renderTabs(); renderGrid();
+    } catch (e) {
+      document.getElementById('grid').innerHTML =
+        '<div class="empty">加载失败：' + e.message + '<br/>请确认后端已启动</div>';
+    }
+  })();
+</script>
+</body>
+</html>
