@@ -194,6 +194,41 @@
       border: 1.5px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
       margin-top: 0; align-self: center; height: auto;
     }
+    /* 球面下钻面包屑（左上角）：全球 › 洲 › 国家 › 城市，点一级就飞过去 */
+    .crumbs {
+      position: absolute; top: 10px; left: 10px; z-index: 7;
+      display: flex; align-items: center; gap: 2px; padding: 4px 8px;
+      background: rgba(255,255,255,.94); border: 1px solid #c9d6e4; border-radius: 999px;
+      box-shadow: 0 2px 8px rgba(20,40,70,.12);
+      font-size: 12px; font-weight: 700; color: #243447; max-width: 70%;
+    }
+    .board.dark + .globe ~ .crumbs,
+    .crumbs.dark { background: rgba(16,28,48,.9); border-color: #2c4363; color: #dbe6f2; }
+    .crumbs .crumb {
+      border: 0; background: none; padding: 2px 6px; border-radius: 999px;
+      font: inherit; color: inherit; cursor: pointer; white-space: nowrap;
+    }
+    .crumbs .crumb:hover { background: rgba(255,107,53,.14); color: var(--primary, #ff6b35); }
+    .crumbs .crumb.now { color: var(--primary, #ff6b35); cursor: default; }
+    .crumbs .crumb.now:hover { background: none; }
+    .crumbs .sep { opacity: .45; font-weight: 400; }
+    .tool-btn.off { opacity: .45; }
+    /* 明信片集邮册 */
+    .album-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px; max-height: 56vh; overflow: auto; margin: 8px 0;
+    }
+    .postcard {
+      border: 1px solid var(--line, #dbe4ee); border-radius: 12px; padding: 8px 10px;
+      background: linear-gradient(180deg, #fffdf7, #fff6e8); text-align: left;
+    }
+    .postcard .pflag { font-size: 22px; }
+    .postcard .pcity { font-weight: 800; font-size: 14px; margin-top: 2px; }
+    .postcard .pcountry { font-size: 11px; color: #8a94a3; }
+    .postcard .psight { font-size: 12px; margin-top: 4px; }
+    .postcard .phello { font-size: 12px; color: #b06a2c; margin-top: 2px; }
+    .postcard .pyear { font-size: 11px; color: #8a94a3; margin-top: 2px; }
+    .album-empty { color: #8a94a3; font-size: 13px; padding: 16px; text-align: center; }
     /* 地图右上角工具区：只看卡 + 缩放；平面 / 球面共用同一位置与样式 */
     .map-tools {
       position: absolute; top: 10px; right: 10px; z-index: 7;
@@ -538,6 +573,7 @@
             <option value="carto">🎨 明亮卡通</option>
           </select>
           <button id="themeBtn" class="btn ghost small" title="切换主题（亮色 / 暗色）">🌞 亮色</button>
+          <button id="albumBtn" class="btn ghost small" title="我的明信片集邮册（到过的城市自动盖章，跨局保留）">📮 集邮册</button>
           <span id="timerInfo" class="timer hidden"></span>
         </span>
       </div>
@@ -546,8 +582,11 @@
         <!-- 球面：three.js 贴图地球（WebGL，在下） + 航线/城市/棋子的 2D 覆盖层（在上） -->
         <canvas id="globe3d" class="globe3d hidden"></canvas>
         <canvas id="globe" class="globe hidden"></canvas>
+        <!-- 球面下钻面包屑：全球 › 洲 › 国家 › 城市，点任意一级直接飞回去 -->
+        <div id="globeCrumbs" class="crumbs hidden"></div>
         <div class="map-tools">
           <button id="cardOnlyBtn" class="tool-btn hidden" title="只看城市卡上的城市（再点还原全部城市）">👁</button>
+          <button id="fogBtn" class="tool-btn hidden" title="探索迷雾：没去过的地方罩着云（球面）">🌫</button>
           <div id="mapZoom" class="map-zoom">
             <button id="zoomInBtn" class="zbtn" title="放大地图">+</button>
             <button id="zoomOutBtn" class="zbtn" title="缩小地图">−</button>
@@ -613,6 +652,16 @@
   </main>
 
   <div id="cityModal" class="cmask hidden"><div class="ccard" id="cityCard"></div></div>
+
+  <!-- 明信片集邮册：到过的城市自动盖章，跨局保留 -->
+  <div id="albumMask" class="cmask hidden">
+    <div class="ccard">
+      <h2>📮 我的明信片集邮册</h2>
+      <div class="csub" id="albumSub">到过的城市会自动盖上明信片</div>
+      <div id="albumGrid" class="album-grid"></div>
+      <div class="cbtns"><button class="btn ghost" id="albumCloseBtn">关闭</button></div>
+    </div>
+  </div>
 
   <!-- 一局结束：战报 + 询问再来一局 -->
   <div id="endMask" class="cmask hidden">
@@ -877,7 +926,11 @@
       // 球面默认静止：不自动旋转，只有拖拽（含松手后的短惯性）与滚轮缩放会改变视角
       const GLOBE = { yaw: 2.0, pitch: 0.4, drag: false, moved: 0, lx: 0, ly: 0,
                       dots: [], stars: null, raf: 0, cx: 0, cy: 0, r: 0,
-                      init: false, zoom: 1, vy: 0, dirty: true, anim: null };
+                      init: false, zoom: 1, vy: 0, dirty: true, anim: null,
+                      fog: true, fogCv: null, landV: null, clickCity: null };
+      // 探索迷雾开关（记住玩家的选择）
+      const FOG_KEY = GAME_ID + '_fog';
+      try { GLOBE.fog = localStorage.getItem(FOG_KEY) !== '0'; } catch (e) {}
 
       // 星空背景（固定随机，避免每帧闪烁；仅暗色主题绘制）
       function drawStars(ctx, w, h, dark) {
@@ -1178,6 +1231,275 @@
         if (!f) return;
         globeAnimTo(GLOBE.yaw + globeAngDiff(f.yaw, GLOBE.yaw), f.pitch, zoom, ms);
       }
+
+      // ---------- 层级下钻：全球(0) › 洲(1) › 国家(2) › 城市(3) ----------
+      // 固定档位而不是连续缩放：每一层都有明确"我在看什么"，不会迷失在中间态
+      const LEVEL_ZOOM = [1, 2.2, 3.6, 5];
+      function globeLevel() {
+        const z = GLOBE.zoom || 1;
+        for (let i = LEVEL_ZOOM.length - 1; i >= 0; i--) if (z >= LEVEL_ZOOM[i] - 0.06) return i;
+        return 0;
+      }
+      // 球心最近的城市：面包屑用它判断"现在在看哪儿"
+      function globeCenterCity() {
+        if (!MAP || !MAP.geo) return null;
+        let best = null, bd = 0.3;
+        Object.keys(MAP.geo).forEach(function (n) {
+          const g = MAP.geo[n];
+          const p = projectVec(g[0], g[1]);
+          if (p.z <= 0) return;
+          const d = Math.sqrt(p.x * p.x + p.y * p.y);
+          if (d < bd) { bd = d; best = n; }
+        });
+        return best;
+      }
+      // 距离屏幕点最近的城市（双击吸附用，比命中判定宽松）
+      function globeNearestCity(px, py, maxPx) {
+        if (!MAP || !MAP.geo) return null;
+        let best = null, bd = maxPx || 70;
+        Object.keys(MAP.geo).forEach(function (n) {
+          const p = projectVec(MAP.geo[n][0], MAP.geo[n][1]);
+          if (p.z <= 0) return;
+          const x = GLOBE.cx + p.x * GLOBE.r, y = GLOBE.cy + p.y * GLOBE.r;
+          const d = Math.sqrt((x - px) * (x - px) + (y - py) * (y - py));
+          if (d < bd) { bd = d; best = n; }
+        });
+        return best;
+      }
+      // 一组城市的球面中心：先把经纬度转成向量再平均（避免跨 180° 经线算错），
+      // 再归一化回球面——这就是"洲 / 国家"的镜头落点
+      function regionCenter(pred) {
+        if (!MAP || !MAP.geo) return null;
+        let sx = 0, sy = 0, sz = 0, n = 0;
+        Object.keys(MAP.geo).forEach(function (name) {
+          if (!pred(name)) return;
+          const v = lonLatVec(MAP.geo[name][0], MAP.geo[name][1]);
+          sx += v[0]; sy += v[1]; sz += v[2]; n++;
+        });
+        if (!n) return null;
+        const m = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1;
+        return [Math.atan2(sx / m, sz / m), Math.asin(Math.max(-1, Math.min(1, sy / m)))];
+      }
+      function zoneOf(n) { const i = CITY_INFO[n]; return (i && i.zone) || ''; }
+      function countryOf(n) { const i = CITY_INFO[n]; return (i && i.country) || ''; }
+      // 双击：往上钻一层（吸附到最近城市）；已在城市层则回到全球
+      function globeDrillDeeper(lonLat) {
+        const lv = globeLevel();
+        if (lv >= LEVEL_ZOOM.length - 1) {
+          globeAnimTo(GLOBE.yaw, GLOBE.pitch, LEVEL_ZOOM[0], 420);
+          toast('已回到全球视角');
+          return;
+        }
+        const city = GLOBE.clickCity || globeCenterCity();
+        const next = lv + 1;
+        let target = lonLat;
+        if (city && MAP.geo[city]) {
+          const g = MAP.geo[city];
+          const own = [g[0] * Math.PI / 180, g[1] * Math.PI / 180];
+          if (next === 1) target = regionCenter(function (n) { return zoneOf(n) === zoneOf(city); }) || own;
+          else if (next === 2) target = regionCenter(function (n) { return countryOf(n) === countryOf(city); }) || own;
+          else target = own;
+        }
+        globeDrillTo(target[0], target[1], LEVEL_ZOOM[next], 460);
+      }
+      // 面包屑：全球 › 洲 › 国家 › 城市，点任意一级直接飞过去
+      function globeGotoLevel(lv) {
+        if (lv <= 0) { globeAnimTo(GLOBE.yaw, GLOBE.pitch, LEVEL_ZOOM[0], 420); return; }
+        const city = globeCenterCity();
+        if (!city || !MAP.geo[city]) { setGlobeZoom(LEVEL_ZOOM[lv]); return; }
+        const g = MAP.geo[city];
+        let target = [g[0] * Math.PI / 180, g[1] * Math.PI / 180];
+        if (lv === 1) target = regionCenter(function (n) { return zoneOf(n) === zoneOf(city); }) || target;
+        if (lv === 2) target = regionCenter(function (n) { return countryOf(n) === countryOf(city); }) || target;
+        globeDrillTo(target[0], target[1], LEVEL_ZOOM[lv], 460);
+      }
+      function renderCrumbs() {
+        const box = $('globeCrumbs');
+        if (!box) return;
+        if (viewMode !== 'globe') { box.classList.add('hidden'); return; }
+        box.classList.remove('hidden');
+        const city = globeCenterCity(), lv = globeLevel();
+        const items = [{ label: '🌍 全球', level: 0 }];
+        if (city) {
+          if (lv >= 1 && zoneOf(city)) items.push({ label: zoneOf(city), level: 1 });
+          if (lv >= 2 && countryOf(city)) items.push({ label: countryOf(city), level: 2 });
+          if (lv >= 3) items.push({ label: city, level: 3 });
+        }
+        const key = items.map(function (i) { return i.label; }).join('|') + '#' + lv;
+        if (box.dataset.key === key) return;              // 没变就不重排
+        box.dataset.key = key;
+        box.innerHTML = '';
+        items.forEach(function (it, idx) {
+          if (idx) {
+            const s = document.createElement('span');
+            s.className = 'sep'; s.textContent = '›';
+            box.appendChild(s);
+          }
+          const b = document.createElement('button');
+          b.className = 'crumb' + (idx === items.length - 1 ? ' now' : '');
+          b.textContent = it.label;
+          if (idx !== items.length - 1) b.addEventListener('click', function () { globeGotoLevel(it.level); });
+          box.appendChild(b);
+        });
+      }
+
+      // ---------- 探索迷雾：到过 / 相邻的地方才揭开，越玩世界越完整 ----------
+      const REVEAL_KEY = GAME_ID + '_revealed';
+      function loadRevealed() {
+        try { return new Set(JSON.parse(localStorage.getItem(REVEAL_KEY) || '[]')); } catch (e) { return new Set(); }
+      }
+      let REVEALED = loadRevealed();
+      function revealedNow() {
+        const out = new Set(REVEALED);
+        const add = function (c) { if (c && MAP && MAP.geo && MAP.geo[c]) out.add(c); };
+        if (state && state.players) state.players.forEach(function (p) {
+          add(p.position);
+          Object.keys(p.passport || {}).forEach(add);
+        });
+        ((state && state.moves) || []).forEach(function (m) { add(m.to); });
+        if (out.size !== REVEALED.size) {
+          REVEALED = out;
+          try { localStorage.setItem(REVEAL_KEY, JSON.stringify([...out].slice(-500))); } catch (e) {}
+        }
+        return out;
+      }
+      // 雾画在离屏画布上再贴回来，避免 destination-out 把底下的地球一起挖掉
+      function drawFog(ctx, cx, cy, R, dark) {
+        if (!GLOBE.fog) return;
+        const S = 512, o = S / 2;
+        let fc = GLOBE.fogCv;
+        if (!fc) { fc = GLOBE.fogCv = document.createElement('canvas'); fc.width = S; fc.height = S; }
+        const f = fc.getContext('2d');
+        f.setTransform(1, 0, 0, 1, 0, 0);
+        f.globalCompositeOperation = 'source-over';
+        f.clearRect(0, 0, S, S);
+        const fg = f.createRadialGradient(o, o, 0, o, o, o);
+        fg.addColorStop(0, dark ? 'rgba(206,218,236,.97)' : 'rgba(238,245,252,.97)');
+        fg.addColorStop(1, dark ? 'rgba(140,162,196,.99)' : 'rgba(206,220,236,.99)');
+        f.fillStyle = fg;
+        f.beginPath(); f.arc(o, o, o, 0, Math.PI * 2); f.fill();
+        // 已揭开的地方挖洞：洞的半径按球体半径缩放，地理范围恒定
+        f.globalCompositeOperation = 'destination-out';
+        const hole = o * 0.2;
+        revealedNow().forEach(function (name) {
+          const g = MAP.geo[name];
+          if (!g) return;
+          const p = projectVec(g[0], g[1]);
+          if (p.z <= 0.02) return;
+          const x = o + p.x * o, y = o + p.y * o;
+          const hg = f.createRadialGradient(x, y, hole * 0.2, x, y, hole);
+          hg.addColorStop(0, 'rgba(0,0,0,1)');
+          hg.addColorStop(0.7, 'rgba(0,0,0,.85)');
+          hg.addColorStop(1, 'rgba(0,0,0,0)');
+          f.fillStyle = hg;
+          f.beginPath(); f.arc(x, y, hole, 0, Math.PI * 2); f.fill();
+        });
+        f.globalCompositeOperation = 'source-over';
+        ctx.drawImage(fc, cx - R, cy - R, R * 2, R * 2);
+      }
+
+      // ---------- 高精度海岸线：放大后用真实海岸线矢量描边，越放越精细 ----------
+      function buildLandVec() {
+        if (GLOBE.landV || !MAP || !MAP.land_geo) return;
+        GLOBE.landV = [];
+        (MAP.land_geo || []).forEach(function (poly) {
+          const vs = [];
+          let sx = 0, sy = 0, sz = 0;
+          poly.forEach(function (q) {
+            const v = lonLatVec(q[0], q[1]);
+            vs.push(v); sx += v[0]; sy += v[1]; sz += v[2];
+          });
+          const m = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1;
+          GLOBE.landV.push({ v: vs, c: [sx / m, sy / m, sz / m] });   // c：整块中心，用于背面剔除
+        });
+      }
+      function drawCoast(ctx, cx, cy, R, dark) {
+        const z = GLOBE.zoom || 1;
+        if (z < 1.5 || !GLOBE.landV) return;
+        const step = z < 2.6 ? 4 : (z < 4 ? 2 : 1);
+        ctx.strokeStyle = dark ? 'rgba(200,230,255,.6)' : 'rgba(24,58,92,.55)';
+        ctx.lineWidth = z < 2.6 ? 1 : 1.3;
+        for (let i = 0; i < GLOBE.landV.length; i++) {
+          const it = GLOBE.landV[i];
+          const cc = rotateVec(it.c, GLOBE.yaw, GLOBE.pitch);
+          if (cc[2] < -0.35) continue;                       // 整块都在背面
+          ctx.beginPath();
+          let started = false;
+          for (let j = 0; j < it.v.length; j += step) {
+            const v = rotateVec(it.v[j], GLOBE.yaw, GLOBE.pitch);
+            if (v[2] <= 0) { started = false; continue; }
+            const x = cx + v[0] * R, y = cy - v[1] * R;
+            if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+
+      // ---------- 航迹云：把自己走过的路连成一条发光拖尾 ----------
+      function drawTrail(ctx, cx, cy, R) {
+        const m = me();
+        if (!m || !m.passport) return;
+        const seq = Object.keys(m.passport);       // 护照按盖章先后有序
+        if (seq.length < 2) return;
+        const hex = colorHex(m.color);
+        ctx.save();
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.shadowColor = hex; ctx.shadowBlur = 10;
+        for (let i = 0; i + 1 < seq.length; i++) {
+          const ga = MAP.geo[seq[i]], gb = MAP.geo[seq[i + 1]];
+          if (!ga || !gb) continue;
+          const t = i / Math.max(1, seq.length - 1);
+          ctx.strokeStyle = hex;
+          ctx.globalAlpha = 0.3 + 0.55 * t;         // 越近的旅途越亮
+          ctx.lineWidth = 3.4;
+          strokePath3D(ctx, cx, cy, R, greatCircle(ga, gb, 24));
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      // ---------- 地标气泡：钻到国家 / 城市层才浮现地标与票价 ----------
+      function drawSightBadges(ctx, items, dark, gz) {
+        if ((GLOBE.zoom || 1) < 3.2) return;
+        const cand = items.filter(function (it) { return it.d > 0.45 && CITY_INFO[it.name]; })
+          .sort(function (a, b) { return (a.prio - b.prio) || (b.d - a.d); })
+          .slice(0, 6);
+        ctx.save();
+        ctx.font = '700 ' + (11 * Math.min(1.4, gz)).toFixed(1) + 'px system-ui, -apple-system, sans-serif';
+        cand.forEach(function (it) {
+          const info = CITY_INFO[it.name];
+          const lines = [(info.flag ? info.flag + ' ' : '') + it.name];
+          if (info.sight) lines.push('📍 ' + info.sight);
+          if (it.f && it.f.cost) lines.push('🎫 ' + it.f.cost + ' 票');
+          let wmax = 0;
+          lines.forEach(function (t) { wmax = Math.max(wmax, ctx.measureText(t).width); });
+          const pad = 6, lh = 14, bw = wmax + pad * 2, bh = lines.length * lh + pad * 1.4;
+          const bx = it.x + 12, by = it.y - bh / 2;
+          ctx.globalAlpha = Math.min(1, 0.55 + 0.45 * it.d);
+          ctx.fillStyle = dark ? 'rgba(14,24,42,.92)' : 'rgba(255,255,255,.95)';
+          ctx.strokeStyle = dark ? 'rgba(120,160,210,.6)' : 'rgba(120,140,165,.5)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          const rr = 8;
+          ctx.moveTo(bx + rr, by);
+          ctx.arcTo(bx + bw, by, bx + bw, by + bh, rr);
+          ctx.arcTo(bx + bw, by + bh, bx, by + bh, rr);
+          ctx.arcTo(bx, by + bh, bx, by, rr);
+          ctx.arcTo(bx, by, bx + bw, by, rr);
+          ctx.closePath();
+          ctx.fill(); ctx.stroke();
+          ctx.textAlign = 'left';
+          lines.forEach(function (t, i) {
+            ctx.fillStyle = i === 0
+              ? (it.f && it.f.reach ? '#ff6b35' : (dark ? '#e8eef7' : '#243447'))
+              : (dark ? '#9fb2c8' : '#5b6b7f');
+            ctx.fillText(t, bx + pad, by + pad + lh * (i + 0.8));
+          });
+        });
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        ctx.textAlign = 'left';
+      }
       function pointInPoly(x, y, poly) {
         let inside = false;
         for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -1263,6 +1585,7 @@
         const dark = $('board').classList.contains('dark');
 
         // 贴图地球（WebGL）可用时：球体本体交给 three.js，本层只画航线/城市/棋子
+        buildLandVec();                 // 海岸线顶点只算一次，之后每帧只做旋转
         const use3D = ensureGlobe3D();
         cv.classList.toggle('overlay', use3D);
         if (use3D) renderGlobe3D(w, h, cx, cy, R);
@@ -1328,6 +1651,11 @@
         ctx.globalAlpha = 1;
         }
 
+        // 探索迷雾：没去过的地方罩着云，去过 / 相邻才揭开（球面专属）
+        drawFog(ctx, cx, cy, R, dark);
+        // 高精度海岸线：放大后用真实海岸线矢量描边，越贴近越精细
+        drawCoast(ctx, cx, cy, R, dark);
+
         // 航线（大圆弧）：本回合可达的那一段加粗，判定与平面视图完全一致
         const V = cityView();
         (MAP.routes || []).forEach(function (r) {
@@ -1345,6 +1673,9 @@
           strokePath3D(ctx, cx, cy, R, greatCircle(ga, gb, 24));
         });
         ctx.globalAlpha = 1;
+
+        // 航迹云：把我走过的路连成发光拖尾（越近的旅途越亮）
+        drawTrail(ctx, cx, cy, R);
 
         // ---- 城市 / 标签 / 棋子：与平面视图同一套状态、颜色、优先级与避让规则 ----
         // 下钻后细节放大：城市点/名字随缩放略增（1× 时不变，最多 2×），越贴近越清楚
@@ -1481,6 +1812,11 @@
         });
         ctx.globalAlpha = 1;
         ctx.textAlign = 'left';
+
+        // 地标气泡：钻到国家 / 城市层才浮现（地标、票价），不放大时不打扰
+        drawSightBadges(ctx, items, dark, gz);
+        // 面包屑跟着视角更新（内容没变就不重排）
+        renderCrumbs();
       }
 
       function globeLoop() {
@@ -1553,27 +1889,20 @@
         };
         cv.addEventListener('pointerup', endDrag);
         cv.addEventListener('pointercancel', endDrag);
-        // 滚轮缩放（0.3x ~ 6x，与按钮同一区间）：以光标下的地面为锚点，
-        // 放大时该点自动滑向球心（越放越贴近当地），缩小时滑向边缘——即真正的下钻
+        // 滚轮：只做纯粹的放大 / 缩小，不转动地球（转动会让人晕，下钻交给双击与面包屑）
         cv.addEventListener('wheel', function (e) {
           e.preventDefault();
-          const rect = cv.getBoundingClientRect();
-          setGlobeZoom((GLOBE.zoom || 1) * (e.deltaY < 0 ? 1.12 : 0.89),
-                       e.clientX - rect.left - GLOBE.cx,
-                       e.clientY - rect.top - GLOBE.cy);
+          setGlobeZoom((GLOBE.zoom || 1) * (e.deltaY < 0 ? 1.18 : 0.85));
         }, { passive: false });
-        // 双击：钻入光标所指之处（已钻入则钻出，回到全球视角）
+        // 双击：往上钻一层（全球 → 洲 → 国家 → 城市），并吸附到最近的城市；
+        // 已经在城市层就钻回全球。点海面也能钻，但会尽量吸到附近的城市上。
         cv.addEventListener('dblclick', function (e) {
           const rect = cv.getBoundingClientRect();
-          const ax = e.clientX - rect.left - GLOBE.cx, ay = e.clientY - rect.top - GLOBE.cy;
-          const ll = globeUnproject(ax / (GLOBE.r || 1), ay / (GLOBE.r || 1));
-          const cur = GLOBE.zoom || 1;
-          if (!ll || cur >= 1.8) {           // 点在球外、或已经贴近：钻出
-            globeAnimTo(GLOBE.yaw, GLOBE.pitch, 1, 420);
-            toast('已退出下钻，回到全球视角');
-            return;
-          }
-          globeDrillTo(ll[0], ll[1], Math.min(6, Math.max(2.6, cur * 2.2)), 480);
+          const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+          const ll = globeUnproject((sx - GLOBE.cx) / (GLOBE.r || 1), (sy - GLOBE.cy) / (GLOBE.r || 1));
+          GLOBE.clickCity = globeNearestCity(sx, sy, 70);
+          globeDrillDeeper(ll || [0, 0]);
+          GLOBE.clickCity = null;
         });
         cv.addEventListener('click', function (e) {
           if (GLOBE.moved > 6) return;          // 拖动过就不当作点击
@@ -1606,6 +1935,12 @@
         if (zc) zc.classList.remove('hidden');
         updateZoomTag();
         try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) {}
+        const fb = $('fogBtn');
+        if (fb) {
+          fb.classList.toggle('hidden', !isGlobe);
+          fb.classList.toggle('off', !GLOBE.fog);
+        }
+        renderCrumbs();                 // 平面视图隐藏面包屑
         if (isGlobe) { syncGlobeStart(); buildGlobeDots(); GLOBE.dirty = true; startGlobeLoop(); }
         else if (state) { render(); }
       }
@@ -1669,6 +2004,7 @@
         card.dataset.pick = '';
         $('cityModal').classList.remove('hidden');
         $('closeCardBtn').onclick = function () { $('cityModal').classList.add('hidden'); };
+        syncAlbum();                      // 到了新城市：明信片同步进集邮册
         const gb = $('goBtn');
         if (gb) gb.onclick = function () {
           socket.emit('move', { room_id: myRoom, player_id: myPid, neighbor: name, color: reach.color });
@@ -1685,6 +2021,52 @@
             });
           };
         });
+      }
+
+      // ---------- 明信片集邮册：到过的城市自动盖章，跨局保留 ----------
+      const ALBUM_KEY = GAME_ID + '_album';
+      function loadAlbum() {
+        try { return JSON.parse(localStorage.getItem(ALBUM_KEY) || '{}'); } catch (e) { return {}; }
+      }
+      function syncAlbum() {
+        if (!state || !state.players) return;
+        const alb = loadAlbum();
+        let changed = false;
+        state.players.forEach(function (p) {
+          Object.keys(p.passport || {}).forEach(function (c) {
+            if (!alb[c]) { alb[c] = p.passport[c] || {}; changed = true; }
+          });
+        });
+        if (changed) { try { localStorage.setItem(ALBUM_KEY, JSON.stringify(alb)); } catch (e) {} }
+      }
+      function openAlbum() {
+        syncAlbum();
+        const alb = loadAlbum();
+        const names = Object.keys(alb);
+        const grid = $('albumGrid');
+        $('albumSub').textContent = names.length
+          ? '已收集 ' + names.length + ' 张明信片（跨局保留）'
+          : '到过的城市会自动盖上明信片';
+        if (!names.length) {
+          grid.innerHTML = '<div class="album-empty">还没有明信片，出发去旅行吧！</div>';
+        } else {
+          grid.innerHTML = names.map(function (n) {
+            const info = CITY_INFO[n] || {};
+            const d = alb[n] || {};
+            const year = (typeof info.year === 'number') ? info.year : d.year;
+            return '<div class="postcard">' +
+              '<div class="pflag">' + esc(info.flag || d.flag || '📍') + '</div>' +
+              '<div class="pcity">' + esc(n) + '</div>' +
+              '<div class="pcountry">' + esc(info.country || d.country || '') +
+              (info.zone ? ' · ' + esc(info.zone) : '') + '</div>' +
+              (info.sight ? '<div class="psight">📍 ' + esc(info.sight) + '</div>' : '') +
+              (info.food ? '<div class="psight">🍽 ' + esc(info.food) + '</div>' : '') +
+              (info.hello ? '<div class="phello">💬 ' + esc(info.hello) + '</div>' : '') +
+              (typeof year === 'number' ? '<div class="pyear">关键年份 ' + yearText(year) + '</div>' : '') +
+              '</div>';
+          }).join('');
+        }
+        $('albumMask').classList.remove('hidden');
       }
 
       // ---------- 护照：印章 / 大洲奖章 / 历史时间轴 ----------
@@ -1869,6 +2251,17 @@
         $('zoomOutBtn').addEventListener('click', function () {
           if (viewMode === 'globe') { setGlobeZoom((GLOBE.zoom || 1) / 1.25); return; }
           zoomAt(zoomLevel() / 1.5); renderBoard();
+        });
+        // 明信片集邮册
+        $('albumBtn').addEventListener('click', openAlbum);
+        $('albumCloseBtn').addEventListener('click', function () { $('albumMask').classList.add('hidden'); });
+        // 探索迷雾开关（球面专属；关掉就能一眼看全世界）
+        $('fogBtn').addEventListener('click', function () {
+          GLOBE.fog = !GLOBE.fog;
+          try { localStorage.setItem(FOG_KEY, GLOBE.fog ? '1' : '0'); } catch (e) {}
+          this.classList.toggle('off', !GLOBE.fog);
+          GLOBE.dirty = true; startGlobeLoop();
+          toast(GLOBE.fog ? '探索迷雾已开启' : '探索迷雾已关闭');
         });
         $('zoomMeBtn').addEventListener('click', function () {
           if (viewMode === 'globe') { focusGlobeMyCity(); return; }
@@ -2444,7 +2837,7 @@
         });
         socket.on('rejoined', function () { showScreen('game'); toast('已重新连接'); });
         socket.on('state', function (s) {
-          state = s; timerLeft = s.timer_remaining || 0; render();
+          state = s; timerLeft = s.timer_remaining || 0; syncAlbum(); render();
         });
         socket.on('error', function (e) {
           const msg = (e && e.msg) || '出错了';
