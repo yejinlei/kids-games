@@ -450,7 +450,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="logo">🏔️ 山河之旅</div>
+    <div class="logo" id="logoText">🏔️ 山河之旅</div>
     <div id="roomTag" class="room-tag hidden"></div>
   </header>
 
@@ -470,7 +470,13 @@
 
       <div class="row">
         <label>每回合
-          <div class="static-field">掷 2 颗骰子（官方玩法）</div>
+          <select id="diceCountSelect" title="每回合掷几颗骰子 = 可以走几步（2 颗为官方玩法）">
+            <option value="1">掷 1 颗骰子</option>
+            <option value="2" selected>掷 2 颗骰子（官方玩法）</option>
+            <option value="3">掷 3 颗骰子</option>
+            <option value="4">掷 4 颗骰子</option>
+            <option value="5">掷 5 颗骰子</option>
+          </select>
         </label>
         <label>回合超时（秒）
           <select id="timeoutSelect">
@@ -824,7 +830,10 @@
         const t = $('gameTitle'), s = $('gameSubtitle');
         if (t) t.textContent = '欢迎来到《' + GAME_SPEC.name + '》';
         if (s) s.textContent = (GAME_SPEC.tags || []).join(' · ') + ' · ' + GAME_SPEC.desc;
-        document.title = GAME_SPEC.name;
+        document.title = GAME_SPEC.name + ' · 儿童桌游';
+        // 顶栏 logo 也按棋种更新（避免世界之旅页面还挂着"山河之旅"的标题）
+        const lg = $('logoText');
+        if (lg) lg.textContent = (GAME_SPEC.icon || '🎲') + ' ' + GAME_SPEC.name;
         // 支持球面的棋盘才显示切换按钮
         const views = GAME_SPEC.views || ['flat'];
         const vb = $('viewBtn');
@@ -2988,7 +2997,8 @@
         const customRid = $('roomIdInput').value.trim();
         const payload = {
           name: name, password: $('createPwdInput').value, room_id: customRid,
-          dice_count: 2, ai_level: $('aiSelect').value,
+          dice_count: parseInt($('diceCountSelect').value, 10) || 2,
+          ai_level: $('aiSelect').value,
           timeout: parseInt($('timeoutSelect').value, 10),
           max_players: parseInt($('maxPlayersSelect').value, 10),
           bot_count: parseInt($('botCountSelect').value, 10)
