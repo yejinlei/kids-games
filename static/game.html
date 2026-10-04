@@ -342,6 +342,7 @@
       background: #f2f6fb; font-weight: 800; font-size: 13px; border: 1.5px solid var(--line);
     }
     .ticket .swatch { width: 12px; height: 12px; border-radius: 3px; }
+    .ticket .tkhint { margin-left: 4px; font-size: 11px; font-weight: 600; opacity: .7; }
     .ticket.wild { background: #eee; }
     /* 房间聊天：消息区可滚动，输入行固定在下方 */
     .chat {
@@ -761,6 +762,16 @@
       function colorName(c) {
         if (c === 'go') return 'GO';
         return (MAP.colors[c] && MAP.colors[c].name) || (EXTRA_PLAYER_COLORS[c] && EXTRA_PLAYER_COLORS[c].name) || c;
+      }
+      // 车票怎么付：与服务端 move() 同一套算法——优先用真票，缺口才用 GO 万能票抵
+      function payText(color, cost, tk) {
+        tk = tk || {};
+        const useC = Math.min(cost, tk[color] || 0), useW = cost - useC;
+        if (!useW) return cost + ' 张' + colorName(color) + '票';
+        const parts = [];
+        if (useC) parts.push(colorName(color) + ' ' + useC);
+        if (useW) parts.push('GO ' + useW);
+        return cost + ' 票：' + parts.join(' + ');
       }
       function me() {
         if (!state || !myPid) return null;
@@ -2081,8 +2092,8 @@
           html += '<div class="why" id="quizWhy"></div></div>';
         }
         html += '<div class="cbtns">' +
-          (canGo ? '<button class="btn primary" id="goBtn">✈ 前往（' + reach.cost + ' 张' +
-            colorName(reach.color) + '票）</button>' : '') +
+          (canGo ? '<button class="btn primary" id="goBtn">✈ 前往（' +
+            payText(reach.color, reach.cost, m.tickets) + '）</button>' : '') +
           '<button class="btn ghost" id="closeCardBtn">' + (canGo ? '再看看' : '关闭') + '</button></div>';
         const card = $('cityCard');
         card.innerHTML = html;
@@ -2412,10 +2423,14 @@
         });
         const reachSet = new Set(), reachInfo = {};
         if (my && state.phase === 'move' && state.moves) {
+          // 与服务端 move() 同一套算法：优先用真票、缺口由 GO 万能票补上
+          const tk = my.tickets || {};
           state.moves.forEach(function (m) {          // 官方规则：可沿同色线路连续走多段
             reachSet.add(m.to);
             const prev = reachInfo[m.to];
-            if (!prev || m.cost < prev.cost) reachInfo[m.to] = m;
+            const useColor = Math.min(m.cost, tk[m.color] || 0);
+            const info = { to: m.to, color: m.color, cost: m.cost, wild: m.cost - useColor };
+            if (!prev || m.cost < prev.cost) reachInfo[m.to] = info;
           });
         }
         const shared = ((state && state.shared_cards) || []).map(function (c) { return c.city; }).filter(Boolean);
@@ -2621,7 +2636,9 @@
             citiesSvg += '<text class="city-label" style="font-size:' + (11.5 * s).toFixed(1) + 'px" x="' + L.x +
               '" y="' + L.y + '" text-anchor="' + L.anchor + '">' + esc(name) +
               (reachInfo[name] ? '<tspan class="cost" style="font-size:' + (9 * s).toFixed(1) + 'px">' +
-                reachInfo[name].cost + '票</tspan>' : '') + '</text>';
+                reachInfo[name].cost + '票' +
+                (reachInfo[name].wild ? '(GO' + reachInfo[name].wild + ')' : '') +
+                '</tspan>' : '') + '</text>';
           }
           citiesSvg += '</g>';
         });
@@ -2726,7 +2743,9 @@
             html += '<div class="ticket"><span class="swatch" style="background:' + colorHex(c) + '"></span>' + colorName(c) + ' ' + n + '</div>';
           });
           const w = m.tickets.go || 0;
-          html += '<div class="ticket wild"><span class="swatch" style="background:' + colorHex('go') + '"></span>GO ' + w + '</div>';
+          html += '<div class="ticket wild" title="GO 是万能票：缺的那几张可用它抵，任意颜色都行">' +
+            '<span class="swatch" style="background:' + colorHex('go') + '"></span>GO ' + w +
+            '<span class="tkhint">万能</span></div>';
           tb.innerHTML = html;
         }
 
