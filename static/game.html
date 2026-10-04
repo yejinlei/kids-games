@@ -1463,7 +1463,7 @@
           const t = i / Math.max(1, seq.length - 1);
           ctx.strokeStyle = hex;
           ctx.globalAlpha = 0.3 + 0.55 * t;         // 越近的旅途越亮
-          ctx.lineWidth = 3.4;
+          ctx.lineWidth = 3.4 * (0.8 + 0.55 * Math.max(1, GLOBE.zoom || 1));  // 下钻后拖尾同步变粗
           strokePath3D(ctx, cx, cy, R, greatCircle(ga, gb, 24));
         }
         ctx.restore();
@@ -1731,7 +1731,9 @@
         drawCoast(ctx, cx, cy, R, dark);
 
         // 航线（大圆弧）：本回合可达的那一段加粗，判定与平面视图完全一致
+        // 下钻后线宽随 zoom 变粗，放大才不会细成一根头发丝；本回合可达的航线加白色衬底更醒目
         const V = cityView();
+        const zThick = 0.8 + 0.55 * Math.max(1, GLOBE.zoom || 1);   // 1×≈1.35 倍，5×≈3.55 倍
         (MAP.routes || []).forEach(function (r) {
           const ga = MAP.geo[r[0]], gb = MAP.geo[r[1]];
           if (!ga || !gb) return;
@@ -1741,10 +1743,18 @@
           const kk = Math.max(0.15, k);
           const hot = (V.myPos === r[0] && V.reachSet.has(r[1])) ||
                       (V.myPos === r[1] && V.reachSet.has(r[0]));
+          const pts = greatCircle(ga, gb, 24);
+          if (hot) {                          // 白/深色衬底：亮色贴图上也看得清
+            ctx.strokeStyle = dark ? 'rgba(10,20,34,.85)' : 'rgba(255,255,255,.9)';
+            ctx.globalAlpha = 0.9 * (0.4 + 0.6 * kk);
+            ctx.lineWidth = (hot ? 5 : 0) * (0.65 + 0.35 * kk) * zThick;
+            ctx.lineCap = 'round';
+            strokePath3D(ctx, cx, cy, R, pts);
+          }
           ctx.strokeStyle = (MAP.colors[r[2]] || {}).hex || '#888';
-          ctx.globalAlpha = (hot ? 0.95 : 0.3) * (0.4 + 0.6 * kk);
-          ctx.lineWidth = (hot ? 2.4 : 1.1) * (0.65 + 0.35 * kk);
-          strokePath3D(ctx, cx, cy, R, greatCircle(ga, gb, 24));
+          ctx.globalAlpha = (hot ? 0.95 : 0.45) * (0.4 + 0.6 * kk);
+          ctx.lineWidth = (hot ? 3 : 1.5) * (0.65 + 0.35 * kk) * zThick;
+          strokePath3D(ctx, cx, cy, R, pts);
         });
         ctx.globalAlpha = 1;
 
