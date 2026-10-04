@@ -855,17 +855,24 @@
         // 开放规则（目标分 / 每回合步数）
         const opts = GAME_SPEC.options || {};
         const row = $('ruleRow');
-        const fill = function (sel, values) {
+        // defVal：该棋盘推荐的值（如世界之旅默认每回合 2 步），没推荐就取第一项
+        const fill = function (sel, values, defVal) {
           if (!values || !values.length) return false;
-          sel.innerHTML = values.map(function (v, i) {
-            return '<option value="' + v + '"' + (i === 0 ? ' selected' : '') + '>' + v + '</option>';
+          const want = String(defVal === undefined || defVal === null ? values[0] : defVal);
+          sel.innerHTML = values.map(function (v) {
+            return '<option value="' + v + '"' + (String(v) === want ? ' selected' : '') +
+              '>' + v + '</option>';
           }).join('');
           return true;
         };
+        // 骰子数下拉是通用控件，也按该棋盘的推荐值预选（世界之旅默认 3 颗）
+        const defs = opts.defaults || {};
+        const dc = $('diceCountSelect');
+        if (dc && defs.dice_count) dc.value = String(defs.dice_count);
         let shown = false;
         if (row) {
-          const a = fill($('winScoreSelect'), opts.win_score);
-          const b = fill($('stepsSelect'), opts.steps_per_turn);
+          const a = fill($('winScoreSelect'), opts.win_score, defs.win_score);
+          const b = fill($('stepsSelect'), opts.steps_per_turn, defs.steps_per_turn);
           shown = a || b;
           row.classList.toggle('hidden', !shown);
           if (!a) row.querySelector('#winScoreSelect').closest('label').classList.add('hidden');

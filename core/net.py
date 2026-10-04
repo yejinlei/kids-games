@@ -196,7 +196,10 @@ def register_game(app, socketio, spec):
         data = data or {}
         name = (data.get('name') or '玩家').strip()[:12] or '玩家'
         password = (data.get('password') or '').strip()
-        dice_count = max(1, int(data.get('dice_count', 2) or 2))
+        # 房主没选的规则项，沿用该棋盘自己的默认值（如世界之旅默认每回合 3 颗骰）
+        spec_defaults = (getattr(spec, 'options', None) or {}).get('defaults') or {}
+        default_dice = int(spec_defaults.get('dice_count', 2) or 2)
+        dice_count = max(1, int(data.get('dice_count', default_dice) or default_dice))
         timeout = int(data.get('timeout', 30) or 30)
         # 可选规则：目标分与每回合步数（不传则沿用该棋盘的默认值）
         try:
@@ -205,10 +208,12 @@ def register_game(app, socketio, spec):
                 win_score = max(5, min(30, win_score))
         except (TypeError, ValueError):
             win_score = None
+        # 每回合步数：正版为 1 步，棋种可在 defaults 里改
+        default_steps = int(spec_defaults.get('steps_per_turn', 1) or 1)
         try:
-            steps_per_turn = max(1, min(3, int(data.get('steps_per_turn', 1) or 1)))
+            steps_per_turn = max(1, min(3, int(data.get('steps_per_turn', default_steps) or default_steps)))
         except (TypeError, ValueError):
-            steps_per_turn = 1
+            steps_per_turn = default_steps
         ai_level = (data.get('ai_level') or 'normal').strip()
         if ai_level not in ('easy', 'normal'):
             ai_level = 'normal'

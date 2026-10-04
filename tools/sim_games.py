@@ -47,7 +47,8 @@ def simulate(spec, seed):
     random.seed(seed)
     room = J.JourneyRoom(spec['mod'].build_map(), 'SIM',
                          max_players=spec['n'], steps_per_turn=spec['steps'],
-                         win_score=spec['win'], ai_level=spec['ai'])
+                         win_score=spec['win'], ai_level=spec['ai'],
+                         dice_count=spec.get('dice'))
     pids = ['p%d' % i for i in range(spec['n'])]
     for i, pid in enumerate(pids):
         room.join(pid, '玩家%d' % i, 's%d' % i)
