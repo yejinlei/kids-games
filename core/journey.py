@@ -337,6 +337,34 @@ class JourneyRoom:
         if len(self.move_path) - 1 >= self.steps_per_turn:
             self._advance()
 
+    def _draw_card(self):
+        """翻开下一张城市卡；牌堆用尽就不再补（该位置空着），随后由 _finish_by_score 收官。"""
+        return self.deck.pop() if self.deck else None
+
+    def _no_more_points(self):
+        """牌堆和桌面都没有城市卡了：谁也不可能再得分。"""
+        return not self.deck and not [c for c in self.shared_cards if c]
+
+    def _finish_by_score(self):
+        """城市卡全部用完：没人能再凑分，按分数收官（同为最高分时，踩中秘密目的地者优先）。"""
+        best = None
+        for pid in self.order:
+            p = self.players.get(pid)
+            if not p:
+                continue
+            key = (p['score'], 1 if p['position'] == p['secret'] else 0)
+            if best is None or key > best[0]:
+                best = (key, pid)
+        if not best:
+            return
+        self.state = 'finished'
+        self.winner = best[1]
+        self.phase = 'done'
+        self.timer_deadline = None
+        w = self.players[best[1]]
+        self.log.append('🎴 城市卡全部用完了，旅行结束！' + w['name'] +
+                        ' 以最高分 ' + str(w['score']) + ' 分获胜！')
+
     def _claims(self, p, path=None):
         city = p['position']
         path = path or [city]
@@ -347,8 +375,8 @@ class JourneyRoom:
             p['score'] += pts
             p.setdefault('cards', []).append(city)
             self.log.append(f'{p["name"]} 获得城市卡 {city}，+{pts} 分！')
-            # 步骤四：翻开一张新的城市卡，补齐桌面 3 张
-            self.shared_cards[idx] = self.deck.pop() if self.deck else None
+            # 步骤四：翻开一张新的城市卡，补齐桌面上的空位
+            self.shared_cards[idx] = self._draw_card()
         # 学习玩法：盖护照章、广播地理/历史见闻、发一道知识题
         self._culture_arrival(p, city)
         # 秘密目的地：只有【当前停留】在秘密目的地才算到达（途经不算）
@@ -463,6 +491,10 @@ class JourneyRoom:
     def _advance(self):
         self._finalize_move()
         if self.state != 'playing':
+            return
+        # 城市卡彻底用完（牌堆空 + 桌面空）：再无人能得分，按分数收官，避免整局僵死
+        if self._no_more_points():
+            self._finish_by_score()
             return
         conn = self.connected_pids()
         if not conn:
