@@ -374,9 +374,12 @@ class JourneyRoom:
             pts = self.M.CITY_POINTS[city]
             p['score'] += pts
             p.setdefault('cards', []).append(city)
-            self.log.append(f'{p["name"]} 获得城市卡 {city}，+{pts} 分！')
             # 步骤四：翻开一张新的城市卡，补齐桌面上的空位
-            self.shared_cards[idx] = self._draw_card()
+            fresh = self._draw_card()
+            self.shared_cards[idx] = fresh
+            # 写明"谁拿走了哪张 + 补上了哪张"，免得别人以为自己的卡被换掉了
+            self.log.append(f'{p["name"]} 抢到公共卡 {city}，+{pts} 分！' +
+                            (f'桌面补上新卡 {fresh}' if fresh else '（城市卡已发完，桌面不再补牌）'))
         # 学习玩法：盖护照章、广播地理/历史见闻、发一道知识题
         self._culture_arrival(p, city)
         # 秘密目的地：只有【当前停留】在秘密目的地才算到达（途经不算）

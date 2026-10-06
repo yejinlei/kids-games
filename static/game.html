@@ -637,9 +637,9 @@
         <p class="tip">房间内所有人可见，单条最多 200 字。</p>
       </div>
       <div class="panel">
-        <h3 id="cardsTitle">城市卡</h3>
+        <h3 id="cardsTitle">桌面公共卡（谁先到谁拿走）</h3>
         <div id="sharedCards" class="cards"></div>
-        <p class="tip">①②③ 为<b>公共卡</b>，所有人可见——只有本回合移动后<b>停留的城市</b>与卡面相同，才能获得该卡分数（取走后翻开新卡）。<br/>④ 为你的<b>秘密目的地</b>，只有你自己看得到；别人只能看到一张背面 🎴。</p>
+        <p class="tip">①②③ 是<b>桌面上公开的城市卡</b>，不属于任何人——谁先在本回合移动后<b>停留</b>在那座城，谁就拿走该卡的分，桌面随即补一张新卡（先到先得，这就是抢卡的乐趣）。<br/>你已经拿到手的卡在下方玩家列表里显示为「🃏 已收城市卡」，<b>别人抢不走</b>。<br/>④ 为你的<b>秘密目的地</b>，只有你自己看得到；别人只能看到一张背面 🎴。</p>
       </div>
       <div class="panel">
         <h3>我的车票</h3>
@@ -2720,7 +2720,8 @@
         const pub = state.shared_cards || [];
         const no = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
         const ct = $('cardsTitle');
-        if (ct) ct.textContent = '城市卡（桌面 ' + pub.length + ' 张 + 秘密目的地）';
+        // 强调这是"桌面上公开的卡、先到先得"，避免被误看成"我的卡"
+        if (ct) ct.textContent = '桌面公共卡 ' + pub.length + ' 张（谁先到谁拿走）+ 秘密目的地';
         let cardsHtml = '';
         for (let i = 0; i < pub.length; i++) {
           const c = pub[i];
