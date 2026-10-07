@@ -121,6 +121,9 @@
     .globe.hidden { display: none; }
     .board.dark + .globe { background: #0f1d33; }
     .land { fill: #eef6ea; stroke: #a9c0a4; stroke-width: 1.5; stroke-linejoin: round; }
+    /* 陆地/线路/拖尾/棋子都放行点击：孩子点在城与城之间的线上或棋子上，
+       也应当算"点了那座城"，而不是被这些大面积元素挡住 */
+    .land, .route, .move-path, .pawns * { pointer-events: none; }
     .route { opacity: .5; }
     .route.reach { opacity: 1; }
     .city.reach .city-circle { stroke: var(--primary, #ff6b35); stroke-width: 3; }
@@ -2353,16 +2356,19 @@
         const bd = $('board');
         let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
         // 拖动平移（与"点城市移动"共存：位移小于 6px 才算点击）
+        // 注意：不能在 pointerdown 就 setPointerCapture——捕获会把随后的 click 重定向到
+        // bd 容器，城市元素永远收不到点击（山河"点了城市却走不了"就是这个原因）。
+        // 因此只有当位移超过阈值、确认是拖动时才捕获。
         bd.addEventListener('pointerdown', function (e) {
           if (viewMode !== 'flat') return;
           dragging = true; moved = false; panned = false;
           sx = e.clientX; sy = e.clientY; ox = view.x; oy = view.y;
-          try { bd.setPointerCapture(e.pointerId); } catch (err) {}
         });
         bd.addEventListener('pointermove', function (e) {
           if (!dragging) return;
           const dx = e.clientX - sx, dy = e.clientY - sy;
           if (!moved && Math.abs(dx) + Math.abs(dy) < 6) return;
+          if (!moved) { try { bd.setPointerCapture(e.pointerId); } catch (err) {} }
           moved = true; panned = true;
           const k = view.w / (bd.clientWidth || 1);
           view.x = ox - dx * k; view.y = oy - dy * k;
@@ -2682,7 +2688,7 @@
         }).join('');
         board.innerHTML = '<svg viewBox="' + view.x + ' ' + view.y + ' ' + view.w + ' ' + view.h +
           '" preserveAspectRatio="xMidYMid meet" style="--zs:' + zoomLevel().toFixed(3) + '">' +
-          landSvg + routesSvg + pathSvg + citiesSvg + pawnsSvg + '</svg>';
+          landSvg + routesSvg + pathSvg + citiesSvg + '<g class="pawns">' + pawnsSvg + '</g></svg>';
 
         board.querySelectorAll('.city').forEach(function (g) {
           g.addEventListener('click', function () {
