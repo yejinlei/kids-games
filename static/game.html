@@ -2071,6 +2071,25 @@
         const c = (MAP.cities || []).find(function (x) { return x.name === name; });
         return c ? c.points : 0;
       }
+      // 这座城市的"城市卡"现在归谁、还能不能得分：
+      // 桌面上的公共卡谁先停留谁拿走；已被收走或还没翻出来的，到了也不加分。
+      function cardNow(name) {
+        const pts = cityPoints(name);
+        if (state && (state.shared_cards || []).some(function (c) { return c.city === name; })) {
+          return { pts: pts, txt: '城市卡 ' + pts + ' 分 · 🟢 在桌面，停留这城即可拿走' };
+        }
+        const mine = me();
+        if (mine && mine.secret === name) {
+          return { pts: pts, txt: '🎴 你的秘密目的地（' + pts + ' 分 · 凑够分并停留即获胜）' };
+        }
+        const owner = ((state && state.players) || []).find(function (p) {
+          return (p.cards || []).indexOf(name) >= 0;
+        });
+        if (owner) {
+          return { pts: pts, txt: '城市卡 ' + pts + ' 分 · 已被 ' + esc(owner.name) + ' 拿走，再到不得分' };
+        }
+        return { pts: pts, txt: '城市卡 ' + pts + ' 分 · 还没翻到桌面，暂不可拿' };
+      }
       function openCityCard(name) {
         if (!CITY_INFO[name]) { toast('这座城市还没有知识卡'); return; }
         const info = CITY_INFO[name];
@@ -2081,7 +2100,7 @@
         let html = '<h2>' + (info.flag || '📍') + ' ' + esc(name) + '</h2>';
         html += '<div class="csub">' + esc(info.country || '') + ' · ' + esc(info.zone || '') +
           (typeof info.year === 'number' ? ' · 关键年份 ' + yearText(info.year) : '') +
-          ' · 城市卡 ' + cityPoints(name) + ' 分</div>';
+          ' · ' + cardNow(name).txt + '</div>';
         if (info.geo) html += '<div class="csec"><div class="lab">📍 地理</div><p>' + esc(info.geo) + '</p></div>';
         if (info.hist) html += '<div class="csec"><div class="lab">🏛 历史（' + yearText(info.year) +
           '）</div><p>' + esc(info.hist) + '</p></div>';
