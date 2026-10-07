@@ -960,7 +960,7 @@
       const GLOBE = { yaw: 2.0, pitch: 0.4, drag: false, moved: 0, lx: 0, ly: 0,
                       dots: [], stars: null, raf: 0, cx: 0, cy: 0, r: 0,
                       init: false, zoom: 1, vy: 0, dirty: true, anim: null,
-                      fog: true, fogCv: null, landV: null, clickCity: null };
+                      fog: true, fogCv: null, landV: null, clickCity: null, peekCity: null };
       // 探索迷雾开关（记住玩家的选择）
       const FOG_KEY = GAME_ID + '_fog';
       try { GLOBE.fog = localStorage.getItem(FOG_KEY) !== '0'; } catch (e) {}
@@ -1540,15 +1540,28 @@
       }
 
       // ---------- 下钻信息浮层：国家层给地标票价，城市层给完整"城市明信片" ----------
+      // 城市明信片浮层：只在"双击城市"时弹出（平时不画，免得挡住航线），
+      // 由 peekCityCard() 的计时器 5 秒后自动清掉。
+      let peekTimer = 0;
+      function peekCityCard(city, ms) {
+        GLOBE.peekCity = city || null;
+        if (peekTimer) { clearTimeout(peekTimer); peekTimer = 0; }
+        if (city) {
+          peekTimer = setTimeout(function () {
+            GLOBE.peekCity = null; peekTimer = 0;
+            GLOBE.dirty = true; startGlobeLoop();
+          }, ms || 5000);
+        }
+        GLOBE.dirty = true; startGlobeLoop();
+      }
       function drawSightBadges(ctx, items, dark, gz) {
-        const z = GLOBE.zoom || 1;
-        if (z < 3.2) return;
-        const full = z >= 4.6;                       // 城市层：展开全部信息
+        const peek = GLOBE.peekCity;
+        if (!peek) return;                           // 没双击城市就什么也不画
+        const full = true;                           // 双击就给完整信息
         const m = me();
         const myPos = m && m.position;
-        const cand = items.filter(function (it) { return it.d > 0.45 && CITY_INFO[it.name]; })
-          .sort(function (a, b) { return (a.prio - b.prio) || (b.d - a.d); })
-          .slice(0, full ? 2 : 6);
+        const cand = items.filter(function (it) { return it.name === peek && it.d > 0.3; });
+        if (!cand.length || !CITY_INFO[peek]) return;
         ctx.save();
         ctx.font = '700 ' + (11 * Math.min(1.4, gz)).toFixed(1) + 'px system-ui, -apple-system, sans-serif';
         cand.forEach(function (it) {
@@ -2010,6 +2023,9 @@
           GLOBE.clickCity = globeNearestCity(sx, sy, 70);
           globeDrillDeeper(ll || [0, 0]);
           GLOBE.clickCity = null;
+          // 双击城市 -> 弹出这座城的"明信片"介绍，5 秒后自己消失；双击海面则不弹
+          const hit = globeHitTest(e.clientX, e.clientY);
+          peekCityCard(hit || null, 5000);
         });
         cv.addEventListener('click', function (e) {
           if (GLOBE.moved > 6) return;          // 拖动过就不当作点击
